@@ -90,7 +90,7 @@ class LockSyncApp extends ConsumerWidget {
           backgroundColor: Color(0xFF1A1A2E),
           contentTextStyle: TextStyle(color: Colors.white),
         ),
-        dialogTheme: const DialogTheme(
+        dialogTheme: const DialogThemeData(
           backgroundColor: Color(0xFF1A1A2E),
           titleTextStyle: TextStyle(color: Colors.white, fontSize: 18),
           contentTextStyle: TextStyle(color: Colors.white70),
