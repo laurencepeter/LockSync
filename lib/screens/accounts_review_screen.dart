@@ -372,7 +372,18 @@ class _AccountsReviewScreenState extends State<AccountsReviewScreen>
       fortnightStart: timesheets.first.fortnightStart,
     );
 
-    final fileName = 'NPUPS_Paysheet_${DateFormat('yyyyMMdd').format(DateTime.now())}';
+    // Build filename with fortnight month-dates period
+    final fortnightStart = timesheets.first.fortnightStart;
+    final fortnightEnd = fortnightStart.add(const Duration(days: 13));
+    final String periodStr;
+    if (fortnightStart.month == fortnightEnd.month) {
+      // Same month: e.g. Mar_10-23_2026
+      periodStr = '${DateFormat('MMM').format(fortnightStart)}_${fortnightStart.day}-${fortnightEnd.day}_${fortnightStart.year}';
+    } else {
+      // Spans months: e.g. Mar_24-Apr_06_2026
+      periodStr = '${DateFormat('MMM').format(fortnightStart)}_${fortnightStart.day}-${DateFormat('MMM').format(fortnightEnd)}_${fortnightEnd.day.toString().padLeft(2, '0')}_${fortnightEnd.year}';
+    }
+    final fileName = 'NPUPS_Paysheet_$periodStr';
     await FileSaver.instance.saveFile(name: fileName, bytes: bytes, ext: 'xlsx', mimeType: MimeType.microsoftExcel);
 
     // Mark all as exported
