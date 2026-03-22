@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../config/app_config.dart';
+import '../services/lock_screen_service.dart';
 import '../services/locksync_ws.dart';
 import '../theme/npups_theme.dart';
 
@@ -60,8 +61,34 @@ class _LockSyncScreenState extends State<LockSyncScreen> with TickerProviderStat
     _lockSync.init().then((_) => _lockSync.connect());
   }
 
+  bool _bgServiceStarted = false;
+
   void _onStateChange() {
     if (mounted) setState(() {});
+
+    // Start the background service the first time we enter the paired state
+    if (_lockSync.state == LockSyncState.paired && !_bgServiceStarted) {
+      _bgServiceStarted = true;
+      LockScreenService.requestPermissions().then((_) {
+        final tokens = _lockSync.getSavedTokens();
+        if (tokens != null && _lockSync.pairId != null && _lockSync.partnerId != null) {
+          LockScreenService.start(
+            serverUrl: _serverUrl,
+            accessToken: tokens['accessToken']!,
+            refreshToken: tokens['refreshToken']!,
+            deviceId: tokens['deviceId']!,
+            pairId: _lockSync.pairId!,
+            partnerId: _lockSync.partnerId!,
+          );
+        }
+      });
+    }
+
+    // Reset the flag when unpaaired so it can start again on next pair
+    if (_lockSync.state == LockSyncState.connected ||
+        _lockSync.state == LockSyncState.disconnected) {
+      _bgServiceStarted = false;
+    }
   }
 
   void _onSyncMessage(SyncMessage msg) {
@@ -150,6 +177,7 @@ class _LockSyncScreenState extends State<LockSyncScreen> with TickerProviderStat
               icon: const Icon(Icons.link_off),
               tooltip: 'Unpair',
               onPressed: () {
+                LockScreenService.stop();
                 _lockSync.unpair();
                 _partnerMessage = '';
               },

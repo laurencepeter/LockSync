@@ -28,10 +28,14 @@ services:
     #   - "127.0.0.1:8080:8080"   # bind to localhost only; Nginx proxies externally
     expose:
       - "8080"
+    volumes:
+      # Persist pairs.json across container restarts — pairs are permanent
+      - locksync_data:/app/data
     env_file:
       - .env
     environment:
       - NODE_ENV=production
+      - DATA_DIR=/app/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 30s
@@ -48,3 +52,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  locksync_data:
+    # Named volume — Docker manages the path; persists across `docker compose down`
+    # In Coolify, this maps to a managed persistent volume automatically.
