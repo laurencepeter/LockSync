@@ -80,12 +80,34 @@ class _ExportScreenState extends State<ExportScreen> {
         fortnightStart: _fortnightStart,
       );
 
+      // Build descriptive filename with month-dates period
+      final fortnightEnd = _fortnightStart.add(const Duration(days: 13));
+      final String periodStr;
+      if (_fortnightStart.month == fortnightEnd.month) {
+        // Same month: e.g. Mar_10-23_2026
+        periodStr = '${DateFormat('MMM').format(_fortnightStart)}_${_fortnightStart.day}-${fortnightEnd.day}_${_fortnightStart.year}';
+      } else {
+        // Spans months: e.g. Mar_24-Apr_06_2026
+        periodStr = '${DateFormat('MMM').format(_fortnightStart)}_${_fortnightStart.day}-${DateFormat('MMM').format(fortnightEnd)}_${fortnightEnd.day.toString().padLeft(2, '0')}_${fortnightEnd.year}';
+      }
+
+      final String fileName;
+      if (_selectedWorkers.length == 1) {
+        // Single worker: lastname_firstname-period
+        final nameParts = _selectedWorkers.first.fullName.split(' ');
+        final lastName = nameParts.last;
+        final firstName = nameParts.first;
+        fileName = '${lastName}_$firstName-$periodStr.xlsx';
+      } else {
+        // Multiple workers: group-based name with period
+        fileName = 'NPUPS_Timesheet_Group${_groupNumber}_$periodStr.xlsx';
+      }
+
       // Download via browser
       final blob = html.Blob([bytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       final url = html.Url.createObjectUrlFromBlob(blob);
-      final dateStr = DateFormat('yyyyMMdd').format(_fortnightStart);
       html.AnchorElement(href: url)
-        ..setAttribute('download', 'NPUPS_Timesheet_Group${_groupNumber}_$dateStr.xlsx')
+        ..setAttribute('download', fileName)
         ..click();
       html.Url.revokeObjectUrl(url);
 
