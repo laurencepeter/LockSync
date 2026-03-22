@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/app_config.dart';
 import '../services/locksync_ws.dart';
 import '../theme/npups_theme.dart';
 
@@ -22,8 +23,7 @@ class LockSyncScreen extends StatefulWidget {
 }
 
 class _LockSyncScreenState extends State<LockSyncScreen> with TickerProviderStateMixin {
-  // TODO: Replace with your actual server URL
-  static const String _serverUrl = 'wss://locksync.yourdomain.com';
+  static const String _serverUrl = AppConfig.lockSyncServerUrl;
 
   late final LockSyncService _lockSync;
   final TextEditingController _codeController = TextEditingController();
@@ -56,8 +56,8 @@ class _LockSyncScreenState extends State<LockSyncScreen> with TickerProviderStat
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Auto-connect on screen open
-    _lockSync.connect();
+    // Load persisted tokens, then connect (auto-authenticates if tokens exist)
+    _lockSync.init().then((_) => _lockSync.connect());
   }
 
   void _onStateChange() {

@@ -19,6 +19,7 @@ dependencies:
   file_saver: ^0.2.14
   path_provider: ^2.1.4
   web_socket_channel: ^3.0.1
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:
