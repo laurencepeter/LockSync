@@ -3,17 +3,20 @@
  *
  * Architecture: Thin relay — the server exists ONLY to:
  *   1. Generate & validate 6-digit pairing codes
- *   2. Issue JWTs after successful pairing
+ *   2. Issue long-lived JWTs after successful pairing (permanent pairing)
  *   3. Forward message deltas between paired devices in real-time
  *
- * No messages are stored. No database needed. This is as close to
- * peer-to-peer as you can get while still routing over the internet.
- * The VPS is a "secure postman" — it authenticates the pair, then
- * blindly forwards sealed envelopes between them.
+ * Pairs are persisted to DATA_DIR/pairs.json so they survive server restarts.
+ * No database needed — just a mounted Docker volume at /app/data.
+ *
+ * The VPS is a "secure postman": authenticates the pair once, then
+ * blindly forwards sealed envelopes between them forever.
  */
 
 require('dotenv').config();
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
@@ -26,16 +29,69 @@ const JWT_SECRET = process.env.JWT_SECRET || (() => {
 })();
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
 const PAIR_CODE_TTL = parseInt(process.env.PAIR_CODE_TTL, 10) || 300;       // seconds
-const JWT_EXPIRY = process.env.JWT_EXPIRY || '7d';
-const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '30d';
+const JWT_EXPIRY = process.env.JWT_EXPIRY || '365d';                          // permanent
+const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '730d';         // 2 years
 const PAIR_RATE_LIMIT = parseInt(process.env.PAIR_RATE_LIMIT, 10) || 10;
 const MAX_MESSAGE_SIZE = parseInt(process.env.MAX_MESSAGE_SIZE, 10) || 16384;
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const PAIRS_FILE = path.join(DATA_DIR, 'pairs.json');
 
-// ─── In-memory stores (no DB needed for a relay) ────────────────────
+// ─── Pair persistence ────────────────────────────────────────────────
+// Saved structure: { pairId: { deviceAId, deviceBId, createdAt } }
+// WS connections are not saved (they're ephemeral). On load we re-hydrate
+// the pair map without ws references; devices re-attach on authenticate.
+
+function ensureDataDir() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (e) {
+    console.error('[STORE] Cannot create data dir:', e.message);
+  }
+}
+
+function savePairs() {
+  try {
+    const data = {};
+    for (const [pairId, pair] of activePairs) {
+      data[pairId] = {
+        deviceAId: pair.deviceA.id,
+        deviceBId: pair.deviceB.id,
+        createdAt: pair.createdAt,
+      };
+    }
+    fs.writeFileSync(PAIRS_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('[STORE] Failed to save pairs:', e.message);
+  }
+}
+
+function loadPairs() {
+  try {
+    if (!fs.existsSync(PAIRS_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(PAIRS_FILE, 'utf8'));
+    let loaded = 0;
+    for (const [pairId, entry] of Object.entries(data)) {
+      activePairs.set(pairId, {
+        deviceA: { id: entry.deviceAId, ws: null },
+        deviceB: { id: entry.deviceBId, ws: null },
+        createdAt: entry.createdAt,
+        _bothOfflineSince: null,
+      });
+      deviceToPair.set(entry.deviceAId, pairId);
+      deviceToPair.set(entry.deviceBId, pairId);
+      loaded++;
+    }
+    console.log(`[STORE] Loaded ${loaded} persisted pair(s)`);
+  } catch (e) {
+    console.error('[STORE] Failed to load pairs:', e.message);
+  }
+}
+
+// ─── In-memory stores ────────────────────────────────────────────────
 /** Pending pairing codes: code → { deviceId, createdAt, ws } */
 const pairingCodes = new Map();
 
-/** Active pairs: pairId → { deviceA: { id, ws }, deviceB: { id, ws } } */
+/** Active pairs: pairId → { deviceA: { id, ws }, deviceB: { id, ws }, createdAt } */
 const activePairs = new Map();
 
 /** Device → pairId lookup for fast disconnect cleanup */
@@ -205,6 +261,8 @@ function handleJoinCode(ws, msg, ip) {
   const pair = {
     deviceA: { id: entry.deviceId, ws: entry.ws },
     deviceB: { id: deviceId, ws },
+    createdAt: Date.now(),
+    _bothOfflineSince: null,
   };
   activePairs.set(pairId, pair);
   deviceToPair.set(entry.deviceId, pairId);
@@ -214,7 +272,7 @@ function handleJoinCode(ws, msg, ip) {
   ws._pairId = pairId;
   entry.ws._pairId = pairId;
 
-  // Issue JWTs to both devices
+  // Issue long-lived JWTs to both devices
   const tokenA = issueTokens(entry.deviceId, pairId);
   const tokenB = issueTokens(deviceId, pairId);
 
@@ -235,7 +293,10 @@ function handleJoinCode(ws, msg, ip) {
   entry.ws._authenticated = true;
   ws._authenticated = true;
 
-  console.log(`[PAIR] Pair ${pairId.slice(0, 8)}… established: ${entry.deviceId.slice(0, 8)}… ↔ ${deviceId.slice(0, 8)}…`);
+  // Persist to disk — this pair is now permanent
+  savePairs();
+
+  console.log(`[PAIR] Pair ${pairId.slice(0, 8)}… established: ${entry.deviceId.slice(0, 8)}… ↔ ${deviceId.slice(0, 8)}… (saved to disk)`);
 }
 
 // ─── Auth: reconnect with existing JWT ───────────────────────────────
@@ -263,9 +324,8 @@ function handleAuthenticate(ws, msg) {
   const pair = activePairs.get(pairId);
 
   if (!pair) {
-    // Pair no longer active on server (server restarted, etc.)
-    // Client should re-pair
-    sendError(ws, 'PAIR_NOT_FOUND', 'Pair session expired. Please re-pair.');
+    // Pair not in memory — can happen if JWT_SECRET changed (different server)
+    sendError(ws, 'PAIR_NOT_FOUND', 'Pair session not found. Please re-pair.');
     return;
   }
 
@@ -324,6 +384,12 @@ function handleRefreshToken(ws, msg) {
     return;
   }
 
+  // Only issue new tokens if the pair still exists
+  if (!activePairs.has(payload.pairId)) {
+    sendError(ws, 'PAIR_NOT_FOUND', 'Pair no longer exists. Please re-pair.');
+    return;
+  }
+
   const tokens = issueTokens(payload.deviceId, payload.pairId);
   send(ws, { type: 'token_refreshed', ...tokens });
 }
@@ -348,7 +414,6 @@ function handleSync(ws, msg) {
   }
 
   // Forward the payload directly — zero inspection, maximum speed.
-  // The server is a dumb pipe. Payload structure is between the clients.
   send(partnerWs, {
     type: 'sync',
     from: ws._deviceId,
@@ -367,7 +432,7 @@ function handleDisconnect(ws) {
   const pair = activePairs.get(pairId);
   if (!pair) return;
 
-  // Notify partner of disconnect (but DON'T destroy the pair — they can reconnect)
+  // Notify partner of disconnect (but DON'T destroy the pair — it's permanent)
   const partnerWs = getPartnerWs(pair, ws._deviceId);
   if (partnerWs?.readyState === 1) {
     send(partnerWs, { type: 'partner_offline' });
@@ -404,7 +469,7 @@ function getPartnerWs(pair, myDeviceId) {
 }
 
 function send(ws, data) {
-  if (ws.readyState === 1) {
+  if (ws?.readyState === 1) {
     ws.send(JSON.stringify(data));
   }
 }
@@ -440,23 +505,9 @@ setInterval(() => {
     }
   }
 
-  // Clean stale pairs (both devices disconnected for > 1 hour)
-  for (const [pairId, pair] of activePairs) {
-    const aAlive = pair.deviceA.ws?.readyState === 1;
-    const bAlive = pair.deviceB.ws?.readyState === 1;
-    if (!aAlive && !bAlive) {
-      if (!pair._bothOfflineSince) {
-        pair._bothOfflineSince = now;
-      } else if (now - pair._bothOfflineSince > 3600000) {
-        activePairs.delete(pairId);
-        deviceToPair.delete(pair.deviceA.id);
-        deviceToPair.delete(pair.deviceB.id);
-        console.log(`[CLEANUP] Pair ${pairId.slice(0, 8)}… removed (both offline > 1h)`);
-      }
-    } else {
-      pair._bothOfflineSince = null;
-    }
-  }
+  // NOTE: Permanent pairs are NEVER auto-deleted from activePairs.
+  // They only disappear if the user explicitly unpairas (not yet implemented server-side)
+  // or if the pairs.json is manually deleted.
 
   // Clean rate limit entries older than 2 minutes
   for (const [ip, entry] of rateLimits) {
@@ -467,7 +518,11 @@ setInterval(() => {
 }, 60000);
 
 // ─── Start ───────────────────────────────────────────────────────────
+ensureDataDir();
+loadPairs();
+
 server.listen(PORT, () => {
   console.log(`[LockSync] WebSocket relay server running on port ${PORT}`);
+  console.log(`[LockSync] Persistent pairs file: ${PAIRS_FILE}`);
   console.log(`[LockSync] Health check: http://localhost:${PORT}/health`);
 });

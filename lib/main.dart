@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'services/lock_screen_service.dart';
 import 'theme/npups_theme.dart';
 import 'models/user_model.dart';
 import 'services/auth_service.dart';
@@ -25,8 +26,11 @@ import 'screens/locksync_screen.dart';
 // Version: 1.0.0 — March 2026
 // ──────────────────────────────────────────────────────────────────────────────
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize lock screen background service + notification channels
+  await LockScreenService.initialize();
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
