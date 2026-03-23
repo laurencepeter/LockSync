@@ -1,7 +1,7 @@
 {
-  "name": "npups-server",
+  "name": "locksync-server",
   "version": "1.0.0",
-  "description": "NPUPS WebSocket relay server — pairing, JWT auth, real-time message sync",
+  "description": "LockSync WebSocket relay server — pairing, JWT auth, real-time message sync",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
