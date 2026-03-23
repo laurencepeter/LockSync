@@ -14,7 +14,7 @@ class WebSocketService extends ChangeNotifier {
   // For production: wss://locksync.yourdomain.com
   static const String _wsUrl = String.fromEnvironment(
     'WS_URL',
-    defaultValue: 'ws://localhost:8080',
+    defaultValue: 'wss://locksync.fireydev.com',
   );
 
   WebSocketChannel? _channel;
