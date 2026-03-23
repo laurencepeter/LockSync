@@ -65,10 +65,11 @@ const wss = new WebSocketServer({
   server,
   maxPayload: MAX_MESSAGE_SIZE,
   verifyClient: ({ req }, done) => {
-    // Origin validation
+    // Origin validation: block cross-origin web requests, but allow native
+    // app connections (Android/iOS dart:io WebSocket sends no Origin header).
     if (ALLOWED_ORIGINS[0] !== '*') {
       const origin = req.headers.origin;
-      if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
+      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
         done(false, 403, 'Origin not allowed');
         return;
       }

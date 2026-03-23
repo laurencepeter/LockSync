@@ -1,14 +1,20 @@
 {
-    "name": "NPUPS",
-    "short_name": "NPUPS",
+    "name": "LockSync",
+    "short_name": "LockSync",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "National Programme for the Upkeep of Public Spaces (NPUPS) Digital System.",
+    "background_color": "#0F0F1A",
+    "theme_color": "#6C5CE7",
+    "description": "Share your lock screen in real-time with the person who matters most.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
+        {
+            "src": "favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        },
         {
             "src": "icons/Icon-192.png",
             "sizes": "192x192",

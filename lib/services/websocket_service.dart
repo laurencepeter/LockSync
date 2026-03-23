@@ -231,17 +231,15 @@ class WebSocketService extends ChangeNotifier {
     _partnerOnline = false;
     notifyListeners();
 
-    // Auto-reconnect with exponential backoff
-    if (_reconnectAttempts < 10) {
-      final delay = Duration(seconds: (1 << _reconnectAttempts).clamp(1, 30));
-      _reconnectAttempts++;
-      _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(delay, () {
-        if (_status == ConnectionStatus.disconnected) {
-          connect();
-        }
-      });
-    }
+    // Auto-reconnect with exponential backoff, retries indefinitely
+    final delay = Duration(seconds: (1 << _reconnectAttempts).clamp(1, 30));
+    if (_reconnectAttempts < 5) _reconnectAttempts++; // cap counter so delay stays at 30s max
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, () {
+      if (_status == ConnectionStatus.disconnected) {
+        connect();
+      }
+    });
   }
 
   void disconnect() {

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/websocket_service.dart';
@@ -17,6 +18,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     with TickerProviderStateMixin {
   late AnimationController _fadeController;
   late AnimationController _slideController;
+  late AnimationController _spinController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
   late Animation<double> _buttonFadeAnim;
@@ -33,6 +35,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
+    _spinController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 8),
+    )..repeat();
 
     _fadeAnim = CurvedAnimation(
       parent: _fadeController,
@@ -60,6 +66,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   void dispose() {
     _fadeController.dispose();
     _slideController.dispose();
+    _spinController.dispose();
     super.dispose();
   }
 
@@ -110,32 +117,55 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                   child: PulseRing(
                     size: 180,
                     color: LockSyncTheme.primaryColor,
-                    child: Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            LockSyncTheme.primaryColor,
-                            LockSyncTheme.accentColor,
-                          ],
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: LockSyncTheme.primaryColor
-                                .withValues(alpha: 0.4),
-                            blurRadius: 30,
-                            spreadRadius: 5,
+                    child: SizedBox(
+                      width: 104,
+                      height: 104,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Spinning sync ring
+                          AnimatedBuilder(
+                            animation: _spinController,
+                            builder: (_, __) => Transform.rotate(
+                              angle: _spinController.value * 2 * math.pi,
+                              child: CustomPaint(
+                                size: const Size(104, 104),
+                                painter: _SyncRingPainter(
+                                  color: LockSyncTheme.accentColor,
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Lock circle
+                          Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  LockSyncTheme.primaryColor,
+                                  LockSyncTheme.accentColor,
+                                ],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: LockSyncTheme.primaryColor
+                                      .withValues(alpha: 0.4),
+                                  blurRadius: 30,
+                                  spreadRadius: 5,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.lock_outline_rounded,
+                              color: Colors.white,
+                              size: 34,
+                            ),
                           ),
                         ],
-                      ),
-                      child: const Icon(
-                        Icons.lock_outline_rounded,
-                        color: Colors.white,
-                        size: 36,
                       ),
                     ),
                   ),
@@ -269,4 +299,85 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       ),
     );
   }
+}
+
+class _SyncRingPainter extends CustomPainter {
+  final Color color;
+  _SyncRingPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 3;
+    final arrowLen = radius * 0.28;
+
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.9)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.8
+      ..strokeCap = StrokeCap.round;
+
+    const gapRad = 0.38;
+
+    // Two arcs each sweeping ~(π - gap), placed 180° apart
+    // Arc 1: starts just past top, goes clockwise ~160°
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2 + gapRad / 2,
+      math.pi - gapRad,
+      false,
+      paint,
+    );
+
+    // Arc 2: starts just past bottom, goes clockwise ~160°
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      math.pi / 2 + gapRad / 2,
+      math.pi - gapRad,
+      false,
+      paint,
+    );
+
+    // Arrowhead at end of arc 1 (angle = π/2 - gapRad/2)
+    _drawArrowhead(canvas, center, radius, math.pi / 2 - gapRad / 2, arrowLen, paint);
+
+    // Arrowhead at end of arc 2 (angle = -π/2 - gapRad/2)
+    _drawArrowhead(canvas, center, radius, -math.pi / 2 - gapRad / 2, arrowLen, paint);
+  }
+
+  void _drawArrowhead(Canvas canvas, Offset center, double radius, double angle,
+      double arrowLen, Paint basePaint) {
+    final tip = Offset(
+      center.dx + radius * math.cos(angle),
+      center.dy + radius * math.sin(angle),
+    );
+    // Clockwise tangent direction at this angle
+    final tangent = angle + math.pi / 2;
+    const spread = 0.45; // ~26°
+
+    final wing1 = Offset(
+      tip.dx - arrowLen * math.cos(tangent - spread),
+      tip.dy - arrowLen * math.sin(tangent - spread),
+    );
+    final wing2 = Offset(
+      tip.dx - arrowLen * math.cos(tangent + spread),
+      tip.dy - arrowLen * math.sin(tangent + spread),
+    );
+
+    final arrowPaint = Paint()
+      ..color = basePaint.color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = basePaint.strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path()
+      ..moveTo(wing1.dx, wing1.dy)
+      ..lineTo(tip.dx, tip.dy)
+      ..lineTo(wing2.dx, wing2.dy);
+
+    canvas.drawPath(path, arrowPaint);
+  }
+
+  @override
+  bool shouldRepaint(_SyncRingPainter old) => old.color != color;
 }
