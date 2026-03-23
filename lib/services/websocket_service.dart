@@ -39,7 +39,7 @@ class WebSocketService extends ChangeNotifier {
 
   WebSocketService({required this.storage});
 
-  void connect() {
+  Future<void> connect() async {
     if (_status == ConnectionStatus.connecting ||
         _status == ConnectionStatus.connected ||
         _status == ConnectionStatus.paired) {
@@ -51,6 +51,10 @@ class WebSocketService extends ChangeNotifier {
 
     try {
       _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+
+      // Wait for the WebSocket handshake to actually complete
+      await _channel!.ready;
+
       _channel!.stream.listen(
         _onMessage,
         onError: (error) {
