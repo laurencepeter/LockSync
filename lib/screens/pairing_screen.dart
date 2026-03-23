@@ -311,11 +311,11 @@ class _PairingScreenState extends State<PairingScreen>
                       size: 180,
                       backgroundColor: Colors.white,
                       eyeStyle: const QrEyeStyle(
-                        eyeShape: QrEyeShape.roundedOuter,
+                        eyeShape: QrEyeShape.circle,
                         color: Color(0xFF1A1A2E),
                       ),
                       dataModuleStyle: const QrDataModuleStyle(
-                        dataModuleShape: QrDataModuleShape.roundedOuter,
+                        dataModuleShape: QrDataModuleShape.circle,
                         color: Color(0xFF1A1A2E),
                       ),
                     ),
