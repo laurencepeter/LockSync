@@ -39,7 +39,7 @@ class WebSocketService extends ChangeNotifier {
 
   WebSocketService({required this.storage});
 
-  void connect() {
+  Future<void> connect() async {
     if (_status == ConnectionStatus.connecting ||
         _status == ConnectionStatus.connected ||
         _status == ConnectionStatus.paired) {
@@ -62,6 +62,12 @@ class WebSocketService extends ChangeNotifier {
           _handleDisconnect();
         },
       );
+      // Await the WebSocket handshake before marking as connected.
+      // On Android (dart:io), the connection is fully async — without this,
+      // the status is set to connected before the TCP/TLS handshake completes,
+      // causing authenticate() messages to be dropped and triggering an
+      // immediate disconnect/reconnect loop. On web this is a no-op.
+      await _channel!.ready;
       _status = ConnectionStatus.connected;
       _reconnectAttempts = 0;
       _startPing();
