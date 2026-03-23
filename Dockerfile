@@ -5,6 +5,7 @@ COPY pubspec.yaml ./
 RUN flutter pub get
 COPY . .
 ARG WS_URL=ws://localhost:8080
+ENV WS_URL=$WS_URL
 RUN flutter build web --release --dart-define=WS_URL=$WS_URL
 
 # Stage 2: Serve with nginx
