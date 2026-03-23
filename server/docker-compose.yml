@@ -13,10 +13,11 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    env_file:
-      - .env
     environment:
       - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - PORT=${PORT:-8080}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 30s
