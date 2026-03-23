@@ -1,13 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'services/storage_service.dart';
 import 'services/websocket_service.dart';
+import 'services/lock_screen_service.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/sync_screen.dart';
 import 'theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize lock screen background service + notification channels
+  await LockScreenService.initialize();
+
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
 
   final storage = StorageService();
   await storage.init();
