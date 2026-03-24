@@ -30,6 +30,7 @@ class _SyncScreenState extends State<SyncScreen>
   final List<_FloatingReaction> _floatingReactions = [];
   StreamSubscription? _reactionSub;
   StreamSubscription? _nudgeSub;
+  StreamSubscription? _wallpaperPromptSub;
 
   @override
   void initState() {
@@ -45,11 +46,13 @@ class _SyncScreenState extends State<SyncScreen>
 
     _textController.addListener(_onTextChanged);
 
-    // Listen for reactions from partner
+    // Listen for reactions / partner events
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ws = context.read<WebSocketService>();
       _reactionSub = ws.onReaction.listen(_onReactionReceived);
       _nudgeSub = ws.onNudge.listen((_) => _onNudgeReceived());
+      _wallpaperPromptSub =
+          ws.onWallpaperPromptNeeded.listen((_) => _showWallpaperPermissionDialog());
     });
   }
 
@@ -60,6 +63,7 @@ class _SyncScreenState extends State<SyncScreen>
     _typingAnim.dispose();
     _reactionSub?.cancel();
     _nudgeSub?.cancel();
+    _wallpaperPromptSub?.cancel();
     super.dispose();
   }
 
@@ -118,6 +122,68 @@ class _SyncScreenState extends State<SyncScreen>
         ),
       );
     }
+  }
+
+  Future<void> _showWallpaperPermissionDialog() async {
+    if (!mounted) return;
+    final ws = context.read<WebSocketService>();
+    // Mark as prompted so this only ever shows once
+    await ws.storage.setAutoWallpaperPrompted(true);
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.lock_rounded, color: LockSyncTheme.primaryColor),
+            SizedBox(width: 10),
+            Text(
+              'Live Lock Screen',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Allow LockSync to automatically update your lock screen wallpaper '
+          'whenever your partner draws, types, or adds a photo?\n\n'
+          'You can change this anytime in Settings.',
+          style: TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              ws.storage.setAutoUpdateWallpaper(false);
+              Navigator.pop(ctx);
+            },
+            child: const Text(
+              'Not now',
+              style: TextStyle(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: LockSyncTheme.primaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () async {
+              await ws.storage.setAutoUpdateWallpaper(true);
+              Navigator.pop(ctx);
+              if (ws.partnerCanvasData != null) {
+                ws.scheduleWallpaperUpdate(ws.partnerCanvasData!);
+              }
+            },
+            child: const Text('Allow'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _sendReaction(String emoji, TapUpDetails details) {

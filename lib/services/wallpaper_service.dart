@@ -137,6 +137,22 @@ class WallpaperService {
     );
   }
 
+  /// Set the lock screen wallpaper silently (no UI feedback).
+  /// Safe to call from background contexts.  Android only.
+  static Future<void> setWallpaperSilent(Uint8List imageBytes) async {
+    if (!Platform.isAndroid) return;
+    try {
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/locksync_wallpaper.png');
+      await file.writeAsBytes(imageBytes);
+      await _channel.invokeMethod('setLockScreenWallpaper', {
+        'path': file.path,
+      });
+    } catch (_) {
+      // Silently fail — auto-update is best-effort
+    }
+  }
+
   /// Save the latest canvas image to gallery (for iOS "refresh & save")
   static Future<void> saveToGallery(
     Uint8List imageBytes, {
