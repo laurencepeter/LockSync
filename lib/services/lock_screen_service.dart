@@ -32,6 +32,8 @@ const _kNotifIdMessage = 2;
 // Keys for communicating between main isolate ↔ background isolate
 const _kInvokeStart = 'locksync.start';
 const _kInvokeStop = 'locksync.stop';
+const _kInvokePause = 'locksync.pause';
+const _kInvokeResume = 'locksync.resume';
 const _kEventMessage = 'locksync.message';
 const _kEventStatus = 'locksync.status';
 
@@ -129,6 +131,20 @@ class LockScreenService {
   /// Stop the background service (e.g. when the user unpairas).
   static Future<void> stop() async {
     FlutterBackgroundService().invoke(_kInvokeStop);
+  }
+
+  /// Pause the background service's WebSocket connection.
+  /// Call when the app comes to the foreground so the main isolate's
+  /// WebSocket is the only active connection for this device.
+  static void pause() {
+    FlutterBackgroundService().invoke(_kInvokePause);
+  }
+
+  /// Resume the background service's WebSocket connection.
+  /// Call when the app goes to the background so messages are still
+  /// received and the lock screen notification stays up to date.
+  static void resume() {
+    FlutterBackgroundService().invoke(_kInvokeResume);
   }
 
   /// Listen for incoming sync messages forwarded by the background isolate.
@@ -351,6 +367,23 @@ void _backgroundMain(ServiceInstance service) async {
     await wsSub?.cancel();
     await channel?.sink.close();
     connect();
+  });
+
+  // ── Pause WS while the main app is in the foreground ──
+  // Prevents dual-connection conflicts that cause the main isolate to
+  // get kicked off the server when the user is editing the canvas.
+  service.on(_kInvokePause).listen((_) async {
+    pingTimer?.cancel();
+    await wsSub?.cancel();
+    await channel?.sink.close();
+    channel = null;
+  });
+
+  // ── Resume WS when the app goes back to the background ──
+  service.on(_kInvokeResume).listen((_) async {
+    if (active) {
+      connect();
+    }
   });
 
   // Auto-start on service launch
