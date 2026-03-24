@@ -20,6 +20,9 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
+    <!-- Full-screen intent on lock screen (flutter_local_notifications) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+
     <application
         android:label="LockSync"
         android:name="${applicationName}"
@@ -52,9 +55,6 @@
             android:foregroundServiceType="dataSync"
             android:exported="false"
             tools:replace="android:exported"/>
-
-        <!-- flutter_local_notifications: allow full-screen intent on lock screen -->
-        <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
 
         <meta-data
             android:name="flutterEmbedding"
