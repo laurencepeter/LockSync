@@ -23,6 +23,18 @@
     <!-- Full-screen intent on lock screen (flutter_local_notifications) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
 
+    <!-- Camera (QR scanner) -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+
+    <!-- Wallpaper setting -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER"/>
+
+    <!-- Gallery save (scoped storage handles this on Android 10+) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"
+        tools:ignore="ScopedStorage"/>
+
     <application
         android:label="LockSync"
         android:name="${applicationName}"

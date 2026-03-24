@@ -1,17 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'storage_service.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected, paired }
 
-class WebSocketService extends ChangeNotifier {
+class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   final StorageService storage;
 
-  // Configure this to your VPS domain
-  // For local dev: ws://localhost:8080
-  // For production: wss://locksync.yourdomain.com
   static const String _wsUrl = String.fromEnvironment(
     'WS_URL',
     defaultValue: 'wss://locksync.fireydev.com',
@@ -28,6 +26,26 @@ class WebSocketService extends ChangeNotifier {
   Timer? _pingTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
+  bool _isReconnecting = false;
+
+  // Display name
+  String? _partnerDisplayName;
+  String? _partnerMood;
+
+  // Nudge rate limiting (client-side)
+  DateTime? _lastNudgeSent;
+
+  // Canvas data from partner
+  Map<String, dynamic>? _partnerCanvasData;
+
+  // Reactions stream
+  final _reactionController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get onReaction => _reactionController.stream;
+
+  // Nudge stream
+  final _nudgeController = StreamController<void>.broadcast();
+  Stream<void> get onNudge => _nudgeController.stream;
 
   ConnectionStatus get status => _status;
   String? get pairingCode => _pairingCode;
@@ -36,8 +54,36 @@ class WebSocketService extends ChangeNotifier {
   bool get partnerOnline => _partnerOnline;
   String get partnerText => _partnerText;
   String? get errorMessage => _errorMessage;
+  String? get partnerDisplayName => _partnerDisplayName;
+  String? get partnerMood => _partnerMood;
+  bool get isReconnecting => _isReconnecting;
+  Map<String, dynamic>? get partnerCanvasData => _partnerCanvasData;
 
-  WebSocketService({required this.storage});
+  WebSocketService({required this.storage}) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _handleAppResumed();
+    }
+  }
+
+  void _handleAppResumed() {
+    if (_status == ConnectionStatus.disconnected ||
+        (_channel == null && storage.isPaired)) {
+      _isReconnecting = true;
+      notifyListeners();
+      connect().then((_) {
+        // After reconnect, delay briefly then clear reconnecting flag
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _isReconnecting = false;
+          notifyListeners();
+        });
+      });
+    }
+  }
 
   Future<void> connect() async {
     if (_status == ConnectionStatus.connecting ||
@@ -62,18 +108,12 @@ class WebSocketService extends ChangeNotifier {
           _handleDisconnect();
         },
       );
-      // Await the WebSocket handshake before marking as connected.
-      // On Android (dart:io), the connection is fully async — without this,
-      // the status is set to connected before the TCP/TLS handshake completes,
-      // causing authenticate() messages to be dropped and triggering an
-      // immediate disconnect/reconnect loop. On web this is a no-op.
       await _channel!.ready;
       _status = ConnectionStatus.connected;
       _reconnectAttempts = 0;
       _startPing();
       notifyListeners();
 
-      // If we have a saved session, try to re-authenticate
       if (storage.isPaired) {
         authenticate();
       }
@@ -107,7 +147,27 @@ class WebSocketService extends ChangeNotifier {
         _pairId = msg['pairId'] as String;
         _partnerId = msg['partnerId'] as String;
         _partnerOnline = msg['partnerOnline'] as bool? ?? false;
+        // Restore buffered last state if server sends it
+        if (msg['lastState'] != null) {
+          final lastState = msg['lastState'] as Map<String, dynamic>;
+          if (lastState['text'] != null) {
+            _partnerText = lastState['text'] as String;
+          }
+          if (lastState['displayName'] != null) {
+            _partnerDisplayName = lastState['displayName'] as String;
+            storage.setPartnerName(_partnerDisplayName!);
+          }
+          if (lastState['mood'] != null) {
+            _partnerMood = lastState['mood'] as String;
+          }
+          if (lastState['canvas'] != null) {
+            _partnerCanvasData = lastState['canvas'] as Map<String, dynamic>;
+          }
+        }
         _status = ConnectionStatus.paired;
+        // Send our display name and mood to partner
+        _syncDisplayName();
+        _syncMood();
         notifyListeners();
         break;
 
@@ -119,8 +179,7 @@ class WebSocketService extends ChangeNotifier {
         break;
 
       case 'sync':
-        _partnerText = (msg['payload']?['text'] as String?) ?? _partnerText;
-        notifyListeners();
+        _handleSyncMessage(msg);
         break;
 
       case 'partner_online':
@@ -140,7 +199,6 @@ class WebSocketService extends ChangeNotifier {
         _errorMessage = msg['message'] as String?;
         final code = msg['code'] as String?;
         if (code == 'PAIR_NOT_FOUND' || code == 'INVALID_TOKEN') {
-          // Session is dead, need to re-pair
           storage.clearSession();
           _status = ConnectionStatus.connected;
         }
@@ -148,6 +206,56 @@ class WebSocketService extends ChangeNotifier {
         break;
     }
   }
+
+  void _handleSyncMessage(Map<String, dynamic> msg) {
+    final payload = msg['payload'] as Map<String, dynamic>?;
+    if (payload == null) return;
+
+    final syncType = payload['syncType'] as String? ?? 'text';
+
+    switch (syncType) {
+      case 'text':
+        _partnerText = (payload['text'] as String?) ?? _partnerText;
+        notifyListeners();
+        break;
+      case 'canvas':
+        _partnerCanvasData = payload['canvasData'] as Map<String, dynamic>?;
+        _partnerText = (payload['text'] as String?) ?? _partnerText;
+        notifyListeners();
+        break;
+      case 'display_name':
+        _partnerDisplayName = payload['displayName'] as String?;
+        if (_partnerDisplayName != null) {
+          storage.setPartnerName(_partnerDisplayName!);
+        }
+        notifyListeners();
+        break;
+      case 'mood':
+        _partnerMood = payload['mood'] as String?;
+        notifyListeners();
+        break;
+      case 'nudge':
+        _nudgeController.add(null);
+        break;
+      case 'reaction':
+        _reactionController.add(payload);
+        break;
+      case 'grocery':
+      case 'watchlist':
+      case 'reminder':
+      case 'countdown':
+        // Widget data syncs — forward to listeners
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+    }
+  }
+
+  // Widget sync stream for grocery/watchlist/reminders/countdowns
+  final _widgetSyncController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get onWidgetSync =>
+      _widgetSyncController.stream;
 
   void _handlePaired(Map<String, dynamic> msg) {
     _pairId = msg['pairId'] as String;
@@ -161,6 +269,10 @@ class WebSocketService extends ChangeNotifier {
       pairId: _pairId!,
       partnerId: _partnerId!,
     );
+
+    // Send display name after pairing
+    _syncDisplayName();
+    _syncMood();
 
     notifyListeners();
   }
@@ -190,7 +302,97 @@ class WebSocketService extends ChangeNotifier {
     if (_status != ConnectionStatus.paired) return;
     _send({
       'type': 'sync',
-      'payload': {'text': text},
+      'payload': {'syncType': 'text', 'text': text},
+    });
+  }
+
+  void sendCanvasData(Map<String, dynamic> canvasData, {String? text}) {
+    if (_status != ConnectionStatus.paired) return;
+    _send({
+      'type': 'sync',
+      'payload': {
+        'syncType': 'canvas',
+        'canvasData': canvasData,
+        if (text != null) 'text': text,
+      },
+    });
+  }
+
+  void _syncDisplayName() {
+    final name = storage.displayName;
+    if (name != null && name.isNotEmpty) {
+      _send({
+        'type': 'sync',
+        'payload': {'syncType': 'display_name', 'displayName': name},
+      });
+    }
+  }
+
+  void sendDisplayName(String name) {
+    storage.setDisplayName(name);
+    if (_status == ConnectionStatus.paired) {
+      _send({
+        'type': 'sync',
+        'payload': {'syncType': 'display_name', 'displayName': name},
+      });
+    }
+  }
+
+  void _syncMood() {
+    final mood = storage.mood;
+    if (mood.isNotEmpty) {
+      _send({
+        'type': 'sync',
+        'payload': {'syncType': 'mood', 'mood': mood},
+      });
+    }
+  }
+
+  void sendMood(String emoji) {
+    storage.setMood(emoji);
+    if (_status == ConnectionStatus.paired) {
+      _send({
+        'type': 'sync',
+        'payload': {'syncType': 'mood', 'mood': emoji},
+      });
+    }
+  }
+
+  void sendNudge() {
+    if (_status != ConnectionStatus.paired) return;
+    final now = DateTime.now();
+    if (_lastNudgeSent != null &&
+        now.difference(_lastNudgeSent!).inSeconds < 10) {
+      return; // Rate limited
+    }
+    _lastNudgeSent = now;
+    _send({
+      'type': 'sync',
+      'payload': {'syncType': 'nudge'},
+    });
+  }
+
+  void sendReaction(String emoji, double x, double y) {
+    if (_status != ConnectionStatus.paired) return;
+    _send({
+      'type': 'sync',
+      'payload': {
+        'syncType': 'reaction',
+        'emoji': emoji,
+        'x': x,
+        'y': y,
+      },
+    });
+  }
+
+  void sendWidgetSync(String widgetType, Map<String, dynamic> data) {
+    if (_status != ConnectionStatus.paired) return;
+    _send({
+      'type': 'sync',
+      'payload': {
+        'syncType': widgetType,
+        ...data,
+      },
     });
   }
 
@@ -201,6 +403,9 @@ class WebSocketService extends ChangeNotifier {
     _partnerOnline = false;
     _partnerText = '';
     _pairingCode = null;
+    _partnerDisplayName = null;
+    _partnerMood = null;
+    _partnerCanvasData = null;
     _status = ConnectionStatus.connected;
     notifyListeners();
   }
@@ -230,9 +435,8 @@ class WebSocketService extends ChangeNotifier {
     _partnerOnline = false;
     notifyListeners();
 
-    // Auto-reconnect with exponential backoff, retries indefinitely
     final delay = Duration(seconds: (1 << _reconnectAttempts).clamp(1, 30));
-    if (_reconnectAttempts < 5) _reconnectAttempts++; // cap counter so delay stays at 30s max
+    if (_reconnectAttempts < 5) _reconnectAttempts++;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(delay, () {
       if (_status == ConnectionStatus.disconnected) {
@@ -252,6 +456,10 @@ class WebSocketService extends ChangeNotifier {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reactionController.close();
+    _nudgeController.close();
+    _widgetSyncController.close();
     disconnect();
     super.dispose();
   }

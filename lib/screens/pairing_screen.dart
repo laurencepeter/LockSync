@@ -7,7 +7,8 @@ import '../services/websocket_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import '../widgets/glass_card.dart';
-import 'sync_screen.dart';
+import 'qr_scanner_screen.dart';
+import 'display_name_screen.dart';
 
 class PairingScreen extends StatefulWidget {
   const PairingScreen({super.key});
@@ -77,12 +78,31 @@ class _PairingScreenState extends State<PairingScreen>
     }
   }
 
-  void _navigateToSync() {
+  void _fillCodeFromScanner(String code) {
+    for (int i = 0; i < 6 && i < code.length; i++) {
+      _codeControllers[i].text = code[i];
+    }
+    final ws = context.read<WebSocketService>();
+    ws.joinCode(code);
+  }
+
+  Future<void> _openScanner() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const QrScannerScreen()),
+    );
+    if (code != null && mounted) {
+      // Switch to Enter Code tab and fill in the code
+      _tabController.animateTo(1);
+      _fillCodeFromScanner(code);
+    }
+  }
+
+  void _navigateToDisplayName() {
     if (_navigated) return;
     _navigated = true;
     Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const SyncScreen(),
+        pageBuilder: (_, __, ___) => const DisplayNameScreen(isInitialSetup: true),
         transitionDuration: const Duration(milliseconds: 600),
         transitionsBuilder: (_, animation, __, child) {
           return FadeTransition(
@@ -104,9 +124,10 @@ class _PairingScreenState extends State<PairingScreen>
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
 
-    // Navigate to sync screen when paired
+    // Navigate to display name screen when paired
     if (ws.status == ConnectionStatus.paired && !_navigated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _navigateToSync());
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _navigateToDisplayName());
     }
 
     return Scaffold(
@@ -322,7 +343,7 @@ class _PairingScreenState extends State<PairingScreen>
                   ),
                   const SizedBox(height: 24),
 
-                  // Animated code display
+                  // Code display — fixed layout with proper constraints
                   _AnimatedCodeDisplay(code: code),
 
                   const SizedBox(height: 16),
@@ -345,7 +366,7 @@ class _PairingScreenState extends State<PairingScreen>
 
           const SizedBox(height: 24),
           Text(
-            'Your partner enters this code on their device\nto complete the pairing',
+            'Your partner enters this code on their device\nor scans the QR code to complete pairing',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.white38,
@@ -366,69 +387,92 @@ class _PairingScreenState extends State<PairingScreen>
             'Enter your partner\'s 6-digit code',
             style: Theme.of(context).textTheme.bodyLarge,
           ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 24),
+
+          // Scan QR button
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: _openScanner,
+              icon: const Icon(Icons.qr_code_scanner_rounded),
+              label: const Text('Scan QR Code Instead'),
+            ),
+          ),
+
+          const SizedBox(height: 24),
 
           GlassCard(
             child: Column(
               children: [
-                // 6-digit input
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(6, (i) {
-                    return Container(
-                      width: 44,
-                      height: 56,
-                      margin: EdgeInsets.only(
-                        left: i == 0 ? 0 : (i == 3 ? 16 : 8),
-                      ),
-                      child: TextField(
-                        controller: _codeControllers[i],
-                        focusNode: _codeFocusNodes[i],
-                        textAlign: TextAlign.center,
-                        keyboardType: TextInputType.number,
-                        maxLength: 1,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                        decoration: InputDecoration(
-                          counterText: '',
-                          contentPadding: EdgeInsets.zero,
-                          filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.08),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+                // 6-digit input — wrapped in LayoutBuilder for proper sizing
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Calculate width per digit based on available space
+                    // 6 digits + 5 gaps (4 small + 1 large)
+                    final totalGap = 8.0 * 4 + 16.0; // 4 small + 1 large gap
+                    final digitWidth =
+                        ((constraints.maxWidth - totalGap) / 6).clamp(36.0, 48.0);
+                    final digitHeight = digitWidth * 1.27;
+
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(6, (i) {
+                        return Container(
+                          width: digitWidth,
+                          height: digitHeight,
+                          margin: EdgeInsets.only(
+                            left: i == 0 ? 0 : (i == 3 ? 16 : 8),
                           ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: LockSyncTheme.primaryColor,
-                              width: 2,
+                          child: TextField(
+                            controller: _codeControllers[i],
+                            focusNode: _codeFocusNodes[i],
+                            textAlign: TextAlign.center,
+                            keyboardType: TextInputType.number,
+                            maxLength: 1,
+                            style: TextStyle(
+                              fontSize: digitWidth * 0.5,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
                             ),
+                            decoration: InputDecoration(
+                              counterText: '',
+                              contentPadding: EdgeInsets.zero,
+                              filled: true,
+                              fillColor: Colors.white.withValues(alpha: 0.08),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                  color: LockSyncTheme.primaryColor,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (value) {
+                              if (value.isNotEmpty && i < 5) {
+                                _codeFocusNodes[i + 1].requestFocus();
+                              }
+                              if (value.isEmpty && i > 0) {
+                                _codeFocusNodes[i - 1].requestFocus();
+                              }
+                              final full = _codeControllers
+                                  .every((c) => c.text.isNotEmpty);
+                              if (full) {
+                                _submitJoinCode(ws);
+                              }
+                            },
                           ),
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                        ],
-                        onChanged: (value) {
-                          if (value.isNotEmpty && i < 5) {
-                            _codeFocusNodes[i + 1].requestFocus();
-                          }
-                          if (value.isEmpty && i > 0) {
-                            _codeFocusNodes[i - 1].requestFocus();
-                          }
-                          // Auto-submit when all filled
-                          final full =
-                              _codeControllers.every((c) => c.text.isNotEmpty);
-                          if (full) {
-                            _submitJoinCode(ws);
-                          }
-                        },
-                      ),
+                        );
+                      }),
                     );
-                  }),
+                  },
                 ),
 
                 const SizedBox(height: 32),
@@ -494,59 +538,73 @@ class _PairingScreenState extends State<PairingScreen>
   }
 }
 
-// ─── Animated code display ──────────────────────────────────────────────
+// ─── Animated code display — fixed with proper constraints ──────────
 class _AnimatedCodeDisplay extends StatelessWidget {
   final String code;
   const _AnimatedCodeDisplay({required this.code});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(code.length, (i) {
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: Duration(milliseconds: 300 + i * 100),
-          curve: Curves.easeOutBack,
-          builder: (context, value, child) {
-            return Transform.scale(
-              scale: value,
-              child: Opacity(
-                opacity: value.clamp(0, 1),
-                child: child,
-              ),
-            );
-          },
-          child: Container(
-            width: 44,
-            height: 56,
-            margin: EdgeInsets.only(left: i == 0 ? 0 : (i == 3 ? 16 : 8)),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  LockSyncTheme.primaryColor.withValues(alpha: 0.3),
-                  LockSyncTheme.accentColor.withValues(alpha: 0.15),
-                ],
-              ),
-              border: Border.all(
-                color: LockSyncTheme.primaryColor.withValues(alpha: 0.4),
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              code[i],
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        );
-      }),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final totalGap = 8.0 * 4 + 16.0;
+          final digitWidth =
+              ((constraints.maxWidth - totalGap) / 6).clamp(36.0, 48.0);
+          final digitHeight = digitWidth * 1.27;
+
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(code.length, (i) {
+              return TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: 1),
+                duration: Duration(milliseconds: 300 + i * 100),
+                curve: Curves.easeOutBack,
+                builder: (context, value, child) {
+                  return Transform.scale(
+                    scale: value,
+                    child: Opacity(
+                      opacity: value.clamp(0, 1),
+                      child: child,
+                    ),
+                  );
+                },
+                child: Container(
+                  width: digitWidth,
+                  height: digitHeight,
+                  margin:
+                      EdgeInsets.only(left: i == 0 ? 0 : (i == 3 ? 16 : 8)),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        LockSyncTheme.primaryColor.withValues(alpha: 0.3),
+                        LockSyncTheme.accentColor.withValues(alpha: 0.15),
+                      ],
+                    ),
+                    border: Border.all(
+                      color:
+                          LockSyncTheme.primaryColor.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    code[i],
+                    style: TextStyle(
+                      fontSize: digitWidth * 0.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          );
+        },
+      ),
     );
   }
 }
