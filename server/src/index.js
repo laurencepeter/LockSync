@@ -5,12 +5,11 @@
  *   1. Generate & validate 6-digit pairing codes
  *   2. Issue long-lived JWTs after successful pairing (permanent pairing)
  *   3. Forward message deltas between paired devices in real-time
+ *   4. Buffer last state per pair for reconnection sync
+ *   5. Rate-limit nudge messages (max 1 per 10 seconds per device)
  *
  * Pairs are persisted to DATA_DIR/pairs.json so they survive server restarts.
  * No database needed — just a mounted Docker volume at /app/data.
- *
- * The VPS is a "secure postman": authenticates the pair once, then
- * blindly forwards sealed envelopes between them forever.
  */
 
 require('dotenv').config();
@@ -33,14 +32,11 @@ const JWT_EXPIRY = process.env.JWT_EXPIRY || '365d';                          //
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '730d';         // 2 years
 const PAIR_RATE_LIMIT = parseInt(process.env.PAIR_RATE_LIMIT, 10) || 10;
 const MAX_MESSAGE_SIZE = parseInt(process.env.MAX_MESSAGE_SIZE, 10) || 16384;
+const NUDGE_COOLDOWN_MS = 10000; // 10 seconds between nudges
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 const PAIRS_FILE = path.join(DATA_DIR, 'pairs.json');
 
 // ─── Pair persistence ────────────────────────────────────────────────
-// Saved structure: { pairId: { deviceAId, deviceBId, createdAt } }
-// WS connections are not saved (they're ephemeral). On load we re-hydrate
-// the pair map without ws references; devices re-attach on authenticate.
-
 function ensureDataDir() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -57,6 +53,7 @@ function savePairs() {
         deviceAId: pair.deviceA.id,
         deviceBId: pair.deviceB.id,
         createdAt: pair.createdAt,
+        displayNames: pair.displayNames || {},
       };
     }
     fs.writeFileSync(PAIRS_FILE, JSON.stringify(data, null, 2));
@@ -75,6 +72,7 @@ function loadPairs() {
         deviceA: { id: entry.deviceAId, ws: null },
         deviceB: { id: entry.deviceBId, ws: null },
         createdAt: entry.createdAt,
+        displayNames: entry.displayNames || {},
         _bothOfflineSince: null,
       });
       deviceToPair.set(entry.deviceAId, pairId);
@@ -88,19 +86,18 @@ function loadPairs() {
 }
 
 // ─── In-memory stores ────────────────────────────────────────────────
-/** Pending pairing codes: code → { deviceId, createdAt, ws } */
 const pairingCodes = new Map();
-
-/** Active pairs: pairId → { deviceA: { id, ws }, deviceB: { id, ws }, createdAt } */
 const activePairs = new Map();
-
-/** Device → pairId lookup for fast disconnect cleanup */
 const deviceToPair = new Map();
-
-/** Rate limiter: IP → { count, windowStart } */
 const rateLimits = new Map();
 
-// ─── HTTP server (health check + upgrade) ────────────────────────────
+/** Last state buffer per pair: pairId → { deviceId → { text, displayName, mood, canvas } } */
+const lastStateBuffer = new Map();
+
+/** Nudge rate limit per device: deviceId → lastNudgeTimestamp */
+const nudgeLimits = new Map();
+
+// ─── HTTP server ─────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -121,8 +118,6 @@ const wss = new WebSocketServer({
   server,
   maxPayload: MAX_MESSAGE_SIZE,
   verifyClient: ({ req }, done) => {
-    // Origin validation: block cross-origin web requests, but allow native
-    // app connections (Android/iOS dart:io WebSocket sends no Origin header).
     if (ALLOWED_ORIGINS[0] !== '*') {
       const origin = req.headers.origin;
       if (origin && !ALLOWED_ORIGINS.includes(origin)) {
@@ -191,7 +186,6 @@ function handleRequestCode(ws, msg) {
     return;
   }
 
-  // Clean up any existing code from this device
   for (const [code, entry] of pairingCodes) {
     if (entry.deviceId === deviceId) {
       pairingCodes.delete(code);
@@ -207,7 +201,6 @@ function handleRequestCode(ws, msg) {
 
   ws._deviceId = deviceId;
 
-  // Auto-expire the code
   setTimeout(() => {
     if (pairingCodes.has(code)) {
       const entry = pairingCodes.get(code);
@@ -224,7 +217,6 @@ function handleRequestCode(ws, msg) {
 
 // ─── Pairing: Device B joins with a code ─────────────────────────────
 function handleJoinCode(ws, msg, ip) {
-  // Rate limiting
   if (!checkRateLimit(ip)) {
     sendError(ws, 'RATE_LIMITED', 'Too many pairing attempts. Try again later.');
     return;
@@ -247,22 +239,20 @@ function handleJoinCode(ws, msg, ip) {
     return;
   }
 
-  // Check expiry
   if (Date.now() - entry.createdAt > PAIR_CODE_TTL * 1000) {
     pairingCodes.delete(code);
     sendError(ws, 'CODE_EXPIRED', 'Pairing code has expired');
     return;
   }
 
-  // Consume the code
   pairingCodes.delete(code);
 
-  // Create the pair
   const pairId = uuidv4();
   const pair = {
     deviceA: { id: entry.deviceId, ws: entry.ws },
     deviceB: { id: deviceId, ws },
     createdAt: Date.now(),
+    displayNames: {},
     _bothOfflineSince: null,
   };
   activePairs.set(pairId, pair);
@@ -273,7 +263,6 @@ function handleJoinCode(ws, msg, ip) {
   ws._pairId = pairId;
   entry.ws._pairId = pairId;
 
-  // Issue long-lived JWTs to both devices
   const tokenA = issueTokens(entry.deviceId, pairId);
   const tokenB = issueTokens(deviceId, pairId);
 
@@ -294,9 +283,7 @@ function handleJoinCode(ws, msg, ip) {
   entry.ws._authenticated = true;
   ws._authenticated = true;
 
-  // Persist to disk — this pair is now permanent
   savePairs();
-
   console.log(`[PAIR] Pair ${pairId.slice(0, 8)}… established: ${entry.deviceId.slice(0, 8)}… ↔ ${deviceId.slice(0, 8)}… (saved to disk)`);
 }
 
@@ -325,12 +312,10 @@ function handleAuthenticate(ws, msg) {
   const pair = activePairs.get(pairId);
 
   if (!pair) {
-    // Pair not in memory — can happen if JWT_SECRET changed (different server)
     sendError(ws, 'PAIR_NOT_FOUND', 'Pair session not found. Please re-pair.');
     return;
   }
 
-  // Re-attach this WebSocket to the pair
   ws._deviceId = deviceId;
   ws._pairId = pairId;
   ws._authenticated = true;
@@ -348,11 +333,16 @@ function handleAuthenticate(ws, msg) {
 
   const partnerId = pair.deviceA.id === deviceId ? pair.deviceB.id : pair.deviceA.id;
 
+  // Get last buffered state from partner
+  const pairBuffer = lastStateBuffer.get(pairId);
+  const partnerState = pairBuffer ? pairBuffer[partnerId] : null;
+
   send(ws, {
     type: 'authenticated',
     pairId,
     partnerId,
     partnerOnline: getPartnerWs(pair, deviceId)?.readyState === 1,
+    lastState: partnerState || null,
   });
 
   // Notify partner that we're back online
@@ -385,7 +375,6 @@ function handleRefreshToken(ws, msg) {
     return;
   }
 
-  // Only issue new tokens if the pair still exists
   if (!activePairs.has(payload.pairId)) {
     sendError(ws, 'PAIR_NOT_FOUND', 'Pair no longer exists. Please re-pair.');
     return;
@@ -408,13 +397,63 @@ function handleSync(ws, msg) {
     return;
   }
 
+  const payload = msg.payload;
+  if (!payload) return;
+
+  const syncType = payload.syncType;
+
+  // Nudge rate limiting (server-side enforcement)
+  if (syncType === 'nudge') {
+    const lastNudge = nudgeLimits.get(ws._deviceId);
+    const now = Date.now();
+    if (lastNudge && now - lastNudge < NUDGE_COOLDOWN_MS) {
+      sendError(ws, 'NUDGE_RATE_LIMITED', 'Wait before sending another nudge');
+      return;
+    }
+    nudgeLimits.set(ws._deviceId, now);
+  }
+
+  // Buffer state for reconnection sync
+  if (syncType === 'text' || syncType === 'display_name' || syncType === 'mood' || syncType === 'canvas') {
+    if (!lastStateBuffer.has(ws._pairId)) {
+      lastStateBuffer.set(ws._pairId, {});
+    }
+    const buffer = lastStateBuffer.get(ws._pairId);
+    if (!buffer[ws._deviceId]) buffer[ws._deviceId] = {};
+
+    if (syncType === 'text') {
+      buffer[ws._deviceId].text = payload.text;
+    } else if (syncType === 'display_name') {
+      buffer[ws._deviceId].displayName = payload.displayName;
+      // Also persist display name in the pair record
+      if (pair.displayNames) {
+        pair.displayNames[ws._deviceId] = payload.displayName;
+        savePairs();
+      }
+    } else if (syncType === 'mood') {
+      buffer[ws._deviceId].mood = payload.mood;
+    } else if (syncType === 'canvas') {
+      buffer[ws._deviceId].canvas = payload.canvasData;
+    }
+  }
+
+  // Input sanitization: strip HTML tags from text fields
+  if (payload.text && typeof payload.text === 'string') {
+    payload.text = sanitizeText(payload.text);
+  }
+  if (payload.displayName && typeof payload.displayName === 'string') {
+    payload.displayName = sanitizeText(payload.displayName);
+  }
+
   const partnerWs = getPartnerWs(pair, ws._deviceId);
   if (!partnerWs || partnerWs.readyState !== 1) {
-    send(ws, { type: 'partner_offline' });
+    // Don't send partner_offline for display_name/mood syncs (they're stored in buffer)
+    if (syncType !== 'display_name' && syncType !== 'mood') {
+      send(ws, { type: 'partner_offline' });
+    }
     return;
   }
 
-  // Forward the payload directly — zero inspection, maximum speed.
   send(partnerWs, {
     type: 'sync',
     from: ws._deviceId,
@@ -433,7 +472,6 @@ function handleDisconnect(ws) {
   const pair = activePairs.get(pairId);
   if (!pair) return;
 
-  // Notify partner of disconnect (but DON'T destroy the pair — it's permanent)
   const partnerWs = getPartnerWs(pair, ws._deviceId);
   if (partnerWs?.readyState === 1) {
     send(partnerWs, { type: 'partner_offline' });
@@ -495,25 +533,31 @@ function checkRateLimit(ip) {
   return true;
 }
 
+/** Strip HTML/script tags from user-submitted text */
+function sanitizeText(text) {
+  return text.replace(/<[^>]*>/g, '').substring(0, 1000);
+}
+
 // ─── Periodic cleanup ────────────────────────────────────────────────
 setInterval(() => {
   const now = Date.now();
 
-  // Clean expired pairing codes
   for (const [code, entry] of pairingCodes) {
     if (now - entry.createdAt > PAIR_CODE_TTL * 1000) {
       pairingCodes.delete(code);
     }
   }
 
-  // NOTE: Permanent pairs are NEVER auto-deleted from activePairs.
-  // They only disappear if the user explicitly unpairas (not yet implemented server-side)
-  // or if the pairs.json is manually deleted.
-
-  // Clean rate limit entries older than 2 minutes
   for (const [ip, entry] of rateLimits) {
     if (now - entry.windowStart > 120000) {
       rateLimits.delete(ip);
+    }
+  }
+
+  // Clean old nudge rate limits (older than 1 minute)
+  for (const [deviceId, ts] of nudgeLimits) {
+    if (now - ts > 60000) {
+      nudgeLimits.delete(deviceId);
     }
   }
 }, 60000);
