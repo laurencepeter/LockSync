@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'canvas_renderer.dart';
+import 'lock_screen_service.dart';
 import 'storage_service.dart';
+import 'wallpaper_service.dart';
 
 enum ConnectionStatus { disconnected, connecting, connected, paired }
 
@@ -38,6 +41,14 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   // Canvas data from partner
   Map<String, dynamic>? _partnerCanvasData;
 
+  // Auto-wallpaper update
+  Timer? _wallpaperDebounce;
+  StreamSubscription? _bgServiceSub;
+
+  // Fired when the app should show the one-time auto-wallpaper permission dialog
+  final _wallpaperPromptController = StreamController<void>.broadcast();
+  Stream<void> get onWallpaperPromptNeeded => _wallpaperPromptController.stream;
+
   // Reactions stream
   final _reactionController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -61,6 +72,26 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
 
   WebSocketService({required this.storage}) {
     WidgetsBinding.instance.addObserver(this);
+    _listenToBackgroundService();
+  }
+
+  /// Relay canvas updates that arrive via the background service isolate
+  /// (i.e. when the phone is locked and the main WebSocket is inactive).
+  void _listenToBackgroundService() {
+    _bgServiceSub = LockScreenService.onMessage.listen((msg) {
+      final payload = msg['payload'] as Map<String, dynamic>?;
+      if (payload == null) return;
+      final syncType = payload['syncType'] as String?;
+      if (syncType == 'canvas') {
+        final canvasData = payload['canvasData'] as Map<String, dynamic>?;
+        if (canvasData != null) {
+          _partnerCanvasData = canvasData;
+          _partnerText = (payload['text'] as String?) ?? _partnerText;
+          notifyListeners();
+          _maybeAutoUpdateWallpaper(canvasData);
+        }
+      }
+    });
   }
 
   @override
@@ -222,6 +253,9 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         _partnerCanvasData = payload['canvasData'] as Map<String, dynamic>?;
         _partnerText = (payload['text'] as String?) ?? _partnerText;
         notifyListeners();
+        if (_partnerCanvasData != null) {
+          _maybeAutoUpdateWallpaper(_partnerCanvasData!);
+        }
         break;
       case 'display_name':
         _partnerDisplayName = payload['displayName'] as String?;
@@ -256,6 +290,33 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get onWidgetSync =>
       _widgetSyncController.stream;
+
+  /// Called on every canvas sync. Shows the one-time permission prompt if
+  /// needed, otherwise schedules a debounced wallpaper render+set.
+  void _maybeAutoUpdateWallpaper(Map<String, dynamic> canvasData) {
+    if (!storage.autoWallpaperPrompted) {
+      // First time: ask the user if they want this feature
+      _wallpaperPromptController.add(null);
+      return;
+    }
+    if (storage.autoUpdateWallpaper) {
+      scheduleWallpaperUpdate(canvasData);
+    }
+  }
+
+  /// Debounced wallpaper update — renders the canvas 1.5 s after the last
+  /// incoming stroke so we don't set the wallpaper on every single point
+  /// while the partner is actively drawing.
+  void scheduleWallpaperUpdate(Map<String, dynamic> canvasData) {
+    _wallpaperDebounce?.cancel();
+    _wallpaperDebounce =
+        Timer(const Duration(milliseconds: 1500), () async {
+      final bytes = await CanvasRenderer.renderToBytes(canvasData);
+      if (bytes != null) {
+        await WallpaperService.setWallpaperSilent(bytes);
+      }
+    });
+  }
 
   void _handlePaired(Map<String, dynamic> msg) {
     _pairId = msg['pairId'] as String;
@@ -460,6 +521,9 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _reactionController.close();
     _nudgeController.close();
     _widgetSyncController.close();
+    _wallpaperPromptController.close();
+    _wallpaperDebounce?.cancel();
+    _bgServiceSub?.cancel();
     disconnect();
     super.dispose();
   }

@@ -14,6 +14,7 @@ class StorageService {
   static const _keyUserFont = 'locksync_user_font';
   static const _keyMood = 'locksync_mood';
   static const _keyAutoUpdateWallpaper = 'locksync_auto_update_wallpaper';
+  static const _keyAutoWallpaperPrompted = 'locksync_auto_wallpaper_prompted';
   static const _keyCanvasState = 'locksync_canvas_state';
   static const _keyMemories = 'locksync_memories';
   static const _keyActiveTheme = 'locksync_active_theme';
@@ -74,9 +75,15 @@ class StorageService {
 
   // Settings
   bool get autoUpdateWallpaper =>
-      _prefs.getBool(_keyAutoUpdateWallpaper) ?? true;
+      _prefs.getBool(_keyAutoUpdateWallpaper) ?? false;
   Future<void> setAutoUpdateWallpaper(bool value) async {
     await _prefs.setBool(_keyAutoUpdateWallpaper, value);
+  }
+
+  bool get autoWallpaperPrompted =>
+      _prefs.getBool(_keyAutoWallpaperPrompted) ?? false;
+  Future<void> setAutoWallpaperPrompted(bool value) async {
+    await _prefs.setBool(_keyAutoWallpaperPrompted, value);
   }
 
   // Active theme

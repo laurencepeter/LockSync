@@ -263,18 +263,44 @@ void _backgroundMain(ServiceInstance service) async {
             case 'sync':
               final payload = msg['payload'];
               if (payload is Map) {
-                final text = payload['text'] as String? ??
-                    payload['delta'] as String? ??
-                    '';
-                if (text.isNotEmpty) {
-                  // Push to lock screen
-                  await showMessageNotif(text);
-                  // Also forward to main isolate if app is open
-                  service.invoke(_kEventMessage, {
-                    'from': msg['from'],
-                    'payload': payload,
-                    'ts': msg['ts'],
-                  });
+                final syncType =
+                    payload['syncType'] as String? ?? 'text';
+
+                // Always relay to the main isolate so it can update the
+                // wallpaper even while the phone is locked.
+                service.invoke(_kEventMessage, {
+                  'from': msg['from'],
+                  'payload': Map<String, dynamic>.from(
+                      payload as Map<Object?, Object?>),
+                  'ts': msg['ts'],
+                });
+
+                // Show a text notification for text / canvas-with-text updates
+                if (syncType == 'text' || syncType == 'canvas') {
+                  final text = payload['text'] as String? ??
+                      payload['delta'] as String? ??
+                      '';
+                  if (text.isNotEmpty) {
+                    await showMessageNotif(text);
+                  }
+                }
+
+                // Persist canvas JSON so we can use it if the main isolate
+                // isn't running when this arrives.
+                if (syncType == 'canvas') {
+                  final canvasData = payload['canvasData'];
+                  if (canvasData != null) {
+                    final prefs = await SharedPreferences.getInstance();
+                    final autoUpdate = prefs.getBool(
+                            'locksync_auto_update_wallpaper') ??
+                        false;
+                    if (autoUpdate) {
+                      await prefs.setString(
+                        'bg_last_canvas_json',
+                        jsonEncode(canvasData),
+                      );
+                    }
+                  }
                 }
               }
               break;
