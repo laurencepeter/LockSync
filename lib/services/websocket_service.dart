@@ -226,7 +226,6 @@ class WebSocketService extends ChangeNotifier {
   void _handleDisconnect() {
     _pingTimer?.cancel();
     _channel = null;
-    final wasPaired = _status == ConnectionStatus.paired;
     _status = ConnectionStatus.disconnected;
     _partnerOnline = false;
     notifyListeners();

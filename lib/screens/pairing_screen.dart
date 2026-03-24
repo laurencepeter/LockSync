@@ -572,7 +572,7 @@ class _ExpiryIndicator extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Text(
-          'Expires in ${minutes}:${seconds.toString().padLeft(2, '0')}',
+          'Expires in $minutes:${seconds.toString().padLeft(2, '0')}',
           style: TextStyle(
             color: isLow ? Colors.amber : Colors.white38,
             fontSize: 13,

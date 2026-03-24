@@ -17,7 +17,6 @@ class _SyncScreenState extends State<SyncScreen>
   final _textController = TextEditingController();
   late AnimationController _enterAnim;
   late AnimationController _typingAnim;
-  bool _showPartnerTyping = false;
   String _lastSentText = '';
 
   @override
