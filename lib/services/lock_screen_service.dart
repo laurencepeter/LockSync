@@ -249,7 +249,7 @@ void _backgroundMain(ServiceInstance service) async {
       _kNotifIdNudge,
       '$partnerName nudged you! 📳',
       'Tap to open LockSync',
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _kNotifChannelNudge,
           'LockSync Nudges',
@@ -259,7 +259,7 @@ void _backgroundMain(ServiceInstance service) async {
           autoCancel: true,
           ongoing: false,
         ),
-        iOS: const DarwinNotificationDetails(
+        iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentSound: true,
         ),
@@ -284,7 +284,7 @@ void _backgroundMain(ServiceInstance service) async {
       _kNotifIdWidget,
       title,
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _kNotifChannelMessages,
           'LockSync Messages',
@@ -294,7 +294,7 @@ void _backgroundMain(ServiceInstance service) async {
           autoCancel: true,
           ongoing: false,
         ),
-        iOS: const DarwinNotificationDetails(
+        iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentSound: false,
         ),

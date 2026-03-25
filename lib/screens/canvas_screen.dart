@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -40,7 +39,6 @@ class _CanvasScreenState extends State<CanvasScreen> {
   List<Offset> _currentStrokePoints = [];
 
   // Text editing
-  int? _editingTextIndex;
   int? _draggingTextIndex;
   Offset? _dragStartOffset;
 
@@ -264,7 +262,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
           points: List.from(_currentStrokePoints),
           color: _currentTool == CanvasTool.eraser
               ? 0xFF0F0F1A
-              : _currentColor.value,
+              : _currentColor.toARGB32(),
           thickness:
               _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
           isEraser: _currentTool == CanvasTool.eraser,
@@ -291,7 +289,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
           points: List.from(_currentStrokePoints),
           color: _currentTool == CanvasTool.eraser
               ? 0xFF0F0F1A
-              : _currentColor.value,
+              : _currentColor.toARGB32(),
           thickness:
               _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
           isEraser: _currentTool == CanvasTool.eraser,
@@ -394,7 +392,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
                     text: controller.text,
                     x: position.dx,
                     y: position.dy,
-                    color: _currentColor.value,
+                    color: _currentColor.toARGB32(),
                     fontSize: _textSize,
                     fontFamily: _selectedFont,
                     addedBy: storage.displayName ?? '',
@@ -492,7 +490,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
           ElevatedButton(
             onPressed: () {
               final storage = context.read<WebSocketService>().storage;
-              storage.setUserColor(_currentColor.value);
+              storage.setUserColor(_currentColor.toARGB32());
               Navigator.pop(ctx);
             },
             child: const Text('Done'),
@@ -601,6 +599,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
       if (byteData == null) return;
 
       final bytes = byteData.buffer.asUint8List();
+      if (!mounted) return;
       await WallpaperService.setLockScreenWallpaper(
         bytes,
         context: context,

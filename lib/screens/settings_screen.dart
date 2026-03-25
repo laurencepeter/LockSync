@@ -53,7 +53,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 8),
 
                     // Profile section
-                    _SectionHeader(title: 'PROFILE'),
+                    const _SectionHeader(title: 'PROFILE'),
                     _SettingsTile(
                       icon: Icons.person_rounded,
                       title: 'Display Name',
@@ -110,7 +110,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 24),
 
                     // Lock Screen section
-                    _SectionHeader(title: 'LOCK SCREEN'),
+                    const _SectionHeader(title: 'LOCK SCREEN'),
                     if (Platform.isAndroid)
                       _SettingsToggle(
                         icon: Icons.wallpaper_rounded,
@@ -168,7 +168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 24),
 
                     // Memories section
-                    _SectionHeader(title: 'MEMORIES'),
+                    const _SectionHeader(title: 'MEMORIES'),
                     _SettingsTile(
                       icon: Icons.photo_library_rounded,
                       title: 'Memory Wall',
@@ -185,7 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 24),
 
                     // Theme section
-                    _SectionHeader(title: 'THEMES'),
+                    const _SectionHeader(title: 'THEMES'),
                     _ThemeSelector(
                       currentTheme: storage.activeTheme,
                       onSelect: (theme) {
@@ -197,7 +197,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 24),
 
                     // Connection section
-                    _SectionHeader(title: 'CONNECTION'),
+                    const _SectionHeader(title: 'CONNECTION'),
                     _SettingsTile(
                       icon: Icons.info_outline_rounded,
                       title: 'Pair ID',
@@ -367,7 +367,7 @@ class _SettingsToggle extends StatelessWidget {
             Switch(
               value: value,
               onChanged: onChanged,
-              activeColor: LockSyncTheme.accentColor,
+              activeThumbColor: LockSyncTheme.accentColor,
             ),
           ],
         ),
