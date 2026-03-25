@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../models/canvas_models.dart';
 import '../services/websocket_service.dart';
+import '../services/wallpaper_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'canvas_screen.dart';
@@ -26,11 +30,18 @@ class _SyncScreenState extends State<SyncScreen>
   late AnimationController _typingAnim;
   String _lastSentText = '';
 
+  // Page view for swiping between canvas and text
+  final _pageController = PageController(initialPage: 0);
+  int _currentPage = 0;
+
+  // Canvas preview state
+  CanvasState _previewCanvasState = CanvasState();
+  StreamSubscription? _canvasSyncSub;
+
   // Floating reactions
   final List<_FloatingReaction> _floatingReactions = [];
   StreamSubscription? _reactionSub;
   StreamSubscription? _nudgeSub;
-  StreamSubscription? _wallpaperPromptSub;
 
   @override
   void initState() {
@@ -51,18 +62,57 @@ class _SyncScreenState extends State<SyncScreen>
       final ws = context.read<WebSocketService>();
       _reactionSub = ws.onReaction.listen(_onReactionReceived);
       _nudgeSub = ws.onNudge.listen((_) => _onNudgeReceived());
-      _wallpaperPromptSub =
-          ws.onWallpaperPromptNeeded.listen((_) => _showWallpaperPermissionDialog());
 
-      // Ask lock screen permission proactively (once, on first ever launch
-      // after pairing) rather than waiting for the first canvas update.
-      if (!ws.storage.autoWallpaperPrompted) {
-        // Small delay so the screen has finished animating in first.
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) _showWallpaperPermissionDialog();
-        });
-      }
+      // Listen for live canvas updates from partner
+      _canvasSyncSub = ws.onCanvasSync.listen(_onCanvasSyncReceived);
+
+      // Load initial canvas preview from local storage
+      _loadCanvasPreview();
+
+      // Auto-enable lock screen display and wallpaper updates — no dialog.
+      _autoEnableLockScreen(ws);
     });
+  }
+
+  void _loadCanvasPreview() {
+    final ws = context.read<WebSocketService>();
+    CanvasState? loaded;
+    final saved = ws.storage.canvasState;
+    if (saved != null) {
+      try {
+        loaded = CanvasState.fromJson(jsonDecode(saved));
+      } catch (_) {}
+    }
+    // Partner canvas data in memory takes priority (most recent)
+    if (ws.partnerCanvasData != null) {
+      try {
+        loaded = CanvasState.fromJson(ws.partnerCanvasData!);
+      } catch (_) {}
+    }
+    if (loaded != null && mounted) {
+      setState(() {
+        _previewCanvasState = loaded!;
+      });
+    }
+  }
+
+  void _onCanvasSyncReceived(Map<String, dynamic> data) {
+    if (!mounted) return;
+    try {
+      setState(() {
+        _previewCanvasState = CanvasState.fromJson(data);
+      });
+    } catch (_) {}
+  }
+
+  /// Auto-enable lock screen features without requiring user interaction.
+  void _autoEnableLockScreen(WebSocketService ws) {
+    if (!ws.storage.autoWallpaperPrompted) {
+      ws.storage.setAutoWallpaperPrompted(true);
+      ws.storage.setAutoUpdateWallpaper(true);
+    }
+    // Always ensure the app can display over the lock screen
+    WallpaperService.setShowOnLockScreen(true);
   }
 
   @override
@@ -70,9 +120,10 @@ class _SyncScreenState extends State<SyncScreen>
     _textController.dispose();
     _enterAnim.dispose();
     _typingAnim.dispose();
+    _pageController.dispose();
     _reactionSub?.cancel();
     _nudgeSub?.cancel();
-    _wallpaperPromptSub?.cancel();
+    _canvasSyncSub?.cancel();
     super.dispose();
   }
 
@@ -131,69 +182,6 @@ class _SyncScreenState extends State<SyncScreen>
         ),
       );
     }
-  }
-
-  Future<void> _showWallpaperPermissionDialog() async {
-    if (!mounted) return;
-    final ws = context.read<WebSocketService>();
-    // Mark as prompted so this only ever shows once
-    await ws.storage.setAutoWallpaperPrompted(true);
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.lock_rounded, color: LockSyncTheme.primaryColor),
-            SizedBox(width: 10),
-            Text(
-              'Live Lock Screen',
-              style: TextStyle(color: Colors.white, fontSize: 18),
-            ),
-          ],
-        ),
-        content: const Text(
-          'LockSync can keep your lock screen updated with your shared canvas '
-          'automatically — so every time your partner draws or adds a photo, '
-          'it appears on your lock screen.\n\n'
-          'You can turn this off anytime in Settings → Lock Screen.',
-          style: TextStyle(color: Colors.white70, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              ws.storage.setAutoUpdateWallpaper(false);
-              Navigator.pop(ctx);
-            },
-            child: const Text(
-              'Not now',
-              style: TextStyle(color: Colors.white54),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: LockSyncTheme.primaryColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: () async {
-              await ws.storage.setAutoUpdateWallpaper(true);
-              Navigator.pop(ctx);
-              if (ws.partnerCanvasData != null) {
-                ws.scheduleWallpaperUpdate(ws.partnerCanvasData!);
-              }
-            },
-            child: const Text('Allow'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _sendReaction(String emoji, TapUpDetails details) {
@@ -436,159 +424,36 @@ class _SyncScreenState extends State<SyncScreen>
 
                     const Divider(color: Colors.white10, height: 1),
 
-                    // Partner's text (what they're writing)
+                    // ── Swipeable pages: Canvas ↔ Text ──
                     Expanded(
-                      child: GestureDetector(
-                        onDoubleTapDown: (details) {
-                          _showReactionPicker(TapUpDetails(
-                            kind: PointerDeviceKind.touch,
-                            globalPosition: details.globalPosition,
-                            localPosition: details.localPosition,
-                          ));
+                      child: PageView(
+                        controller: _pageController,
+                        onPageChanged: (page) {
+                          setState(() => _currentPage = page);
                         },
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.person_outline_rounded,
-                                    size: 16,
-                                    color: LockSyncTheme.accentColor
-                                        .withValues(alpha: 0.7),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '$partnerName\'s Lock Screen',
-                                    style: TextStyle(
-                                      color: LockSyncTheme.accentColor
-                                          .withValues(alpha: 0.7),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 1.2,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 200),
-                                child: partnerText.isEmpty
-                                    ? _EmptyPartnerState(
-                                        typingAnim: _typingAnim,
-                                        online: ws.partnerOnline,
-                                      )
-                                    : _PartnerMessageCard(text: partnerText),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // Divider
-                    Container(
-                      height: 1,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.transparent,
-                            LockSyncTheme.primaryColor.withValues(alpha: 0.3),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Your text input
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.edit_rounded,
-                                size: 16,
-                                color: LockSyncTheme.primaryColor
-                                    .withValues(alpha: 0.7),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Your Lock Screen Message',
-                                style: TextStyle(
-                                  color: LockSyncTheme.primaryColor
-                                      .withValues(alpha: 0.7),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 1.2,
-                                ),
-                              ),
-                            ],
+                          // Page 0: Live canvas preview
+                          _buildCanvasPage(ws, partnerName),
+                          // Page 1: Text messages
+                          _buildTextPage(ws, partnerName, partnerText),
+                        ],
+                      ),
+                    ),
+
+                    // Page indicator dots
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _PageDot(
+                            active: _currentPage == 0,
+                            label: 'Canvas',
                           ),
-                          const SizedBox(height: 12),
-                          Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
-                              color: Colors.white.withValues(alpha: 0.05),
-                              border: Border.all(
-                                color: LockSyncTheme.primaryColor
-                                    .withValues(alpha: 0.2),
-                              ),
-                            ),
-                            child: TextField(
-                              controller: _textController,
-                              maxLines: 4,
-                              minLines: 2,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                height: 1.5,
-                              ),
-                              decoration: InputDecoration(
-                                hintText:
-                                    'Type a message for $partnerName\'s lock screen...',
-                                hintStyle: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                ),
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.all(16),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              AnimatedBuilder(
-                                animation: _typingAnim,
-                                builder: (context, _) {
-                                  return Icon(
-                                    Icons.sync_rounded,
-                                    size: 14,
-                                    color: ws.partnerOnline
-                                        ? LockSyncTheme.accentColor
-                                            .withValues(
-                                                alpha: 0.3 +
-                                                    _typingAnim.value * 0.4)
-                                        : Colors.white12,
-                                  );
-                                },
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                ws.partnerOnline
-                                    ? 'Changes sync instantly'
-                                    : '$partnerName will see this when they\'re back online',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white.withValues(alpha: 0.3),
-                                ),
-                              ),
-                            ],
+                          const SizedBox(width: 12),
+                          _PageDot(
+                            active: _currentPage == 1,
+                            label: 'Messages',
                           ),
                         ],
                       ),
@@ -623,11 +488,16 @@ class _SyncScreenState extends State<SyncScreen>
             children: [
               _BottomAction(
                 icon: Icons.brush_rounded,
-                label: 'Canvas',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CanvasScreen()),
-                ),
+                label: 'Edit Canvas',
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CanvasScreen()),
+                  );
+                  // Reload canvas preview when returning from editor
+                  _loadCanvasPreview();
+                  setState(() {});
+                },
               ),
               _BottomAction(
                 icon: Icons.widgets_rounded,
@@ -676,6 +546,374 @@ class _SyncScreenState extends State<SyncScreen>
       ),
     );
   }
+
+  // ── Page 0: Live canvas preview ──────────────────────────────────
+  Widget _buildCanvasPage(WebSocketService ws, String partnerName) {
+    final hasContent = _previewCanvasState.strokes.isNotEmpty ||
+        _previewCanvasState.textElements.isNotEmpty ||
+        _previewCanvasState.stickers.isNotEmpty ||
+        _previewCanvasState.backgroundImagePath != null;
+
+    return GestureDetector(
+      onDoubleTapDown: (details) {
+        _showReactionPicker(TapUpDetails(
+          kind: PointerDeviceKind.touch,
+          globalPosition: details.globalPosition,
+          localPosition: details.localPosition,
+        ));
+      },
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: const Color(0xFF0F0F1A),
+          border: Border.all(
+            color: LockSyncTheme.primaryColor.withValues(alpha: 0.2),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: [
+            // Background image
+            if (_previewCanvasState.backgroundImagePath != null)
+              Positioned.fill(
+                child: Image.file(
+                  File(_previewCanvasState.backgroundImagePath!),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ),
+
+            // Canvas strokes
+            if (hasContent)
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _CanvasPreviewPainter(
+                    state: _previewCanvasState,
+                  ),
+                ),
+              ),
+
+            // Text elements overlay
+            ..._previewCanvasState.textElements.map((t) {
+              return Positioned(
+                left: t.x,
+                top: t.y,
+                child: Text(
+                  t.text,
+                  style: TextStyle(
+                    color: Color(t.color),
+                    fontSize: t.fontSize,
+                  ),
+                ),
+              );
+            }),
+
+            // Sticker elements overlay
+            ..._previewCanvasState.stickers.map((s) {
+              return Positioned(
+                left: s.x - s.size / 2,
+                top: s.y - s.size / 2,
+                child: Text(
+                  s.emoji,
+                  style: TextStyle(fontSize: s.size),
+                ),
+              );
+            }),
+
+            // Empty state
+            if (!hasContent)
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.brush_rounded,
+                      size: 48,
+                      color: Colors.white.withValues(alpha: 0.1),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Shared Canvas',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.3),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tap "Edit Canvas" to start drawing\nor swipe right for messages',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Swipe hint arrow (right edge)
+            Positioned(
+              right: 8,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  color: Colors.white.withValues(alpha: 0.15),
+                  size: 28,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Page 1: Text messages ────────────────────────────────────────
+  Widget _buildTextPage(
+      WebSocketService ws, String partnerName, String partnerText) {
+    return Column(
+      children: [
+        // Partner's text (what they're writing)
+        Expanded(
+          child: GestureDetector(
+            onDoubleTapDown: (details) {
+              _showReactionPicker(TapUpDetails(
+                kind: PointerDeviceKind.touch,
+                globalPosition: details.globalPosition,
+                localPosition: details.localPosition,
+              ));
+            },
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline_rounded,
+                        size: 16,
+                        color: LockSyncTheme.accentColor
+                            .withValues(alpha: 0.7),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '$partnerName\'s Lock Screen',
+                        style: TextStyle(
+                          color: LockSyncTheme.accentColor
+                              .withValues(alpha: 0.7),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: partnerText.isEmpty
+                        ? _EmptyPartnerState(
+                            typingAnim: _typingAnim,
+                            online: ws.partnerOnline,
+                          )
+                        : _PartnerMessageCard(text: partnerText),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // Divider
+        Container(
+          height: 1,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.transparent,
+                LockSyncTheme.primaryColor.withValues(alpha: 0.3),
+                Colors.transparent,
+              ],
+            ),
+          ),
+        ),
+
+        // Your text input
+        Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.edit_rounded,
+                    size: 16,
+                    color: LockSyncTheme.primaryColor
+                        .withValues(alpha: 0.7),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Your Lock Screen Message',
+                    style: TextStyle(
+                      color: LockSyncTheme.primaryColor
+                          .withValues(alpha: 0.7),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: Colors.white.withValues(alpha: 0.05),
+                  border: Border.all(
+                    color: LockSyncTheme.primaryColor
+                        .withValues(alpha: 0.2),
+                  ),
+                ),
+                child: TextField(
+                  controller: _textController,
+                  maxLines: 4,
+                  minLines: 2,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    height: 1.5,
+                  ),
+                  decoration: InputDecoration(
+                    hintText:
+                        'Type a message for $partnerName\'s lock screen...',
+                    hintStyle: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.all(16),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  AnimatedBuilder(
+                    animation: _typingAnim,
+                    builder: (context, _) {
+                      return Icon(
+                        Icons.sync_rounded,
+                        size: 14,
+                        color: ws.partnerOnline
+                            ? LockSyncTheme.accentColor
+                                .withValues(
+                                    alpha: 0.3 +
+                                        _typingAnim.value * 0.4)
+                            : Colors.white12,
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    ws.partnerOnline
+                        ? 'Changes sync instantly'
+                        : '$partnerName will see this when they\'re back online',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white.withValues(alpha: 0.3),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Page indicator dot ──────────────────────────────────────────────
+class _PageDot extends StatelessWidget {
+  final bool active;
+  final String label;
+  const _PageDot({required this.active, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          width: active ? 20 : 8,
+          height: 8,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            color: active
+                ? LockSyncTheme.primaryColor
+                : Colors.white.withValues(alpha: 0.2),
+          ),
+        ),
+        if (active) ...[
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: LockSyncTheme.primaryColor.withValues(alpha: 0.7),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── Canvas preview painter (read-only) ──────────────────────────────
+class _CanvasPreviewPainter extends CustomPainter {
+  final CanvasState state;
+  _CanvasPreviewPainter({required this.state});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final stroke in state.strokes) {
+      if (stroke.points.isEmpty) continue;
+      final paint = Paint()
+        ..color = Color(stroke.color)
+        ..strokeWidth = stroke.thickness
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      if (stroke.isEraser) {
+        paint.blendMode = BlendMode.clear;
+      }
+      if (stroke.points.length == 1) {
+        canvas.drawCircle(
+          stroke.points[0],
+          stroke.thickness / 2,
+          paint..style = PaintingStyle.fill,
+        );
+        continue;
+      }
+      final path = Path()..moveTo(stroke.points[0].dx, stroke.points[0].dy);
+      for (int i = 1; i < stroke.points.length; i++) {
+        path.lineTo(stroke.points[i].dx, stroke.points[i].dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CanvasPreviewPainter old) => true;
 }
 
 // ─── Bottom action button ────────────────────────────────────────────

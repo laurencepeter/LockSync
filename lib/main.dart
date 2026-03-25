@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'services/storage_service.dart';
 import 'services/websocket_service.dart';
 import 'services/lock_screen_service.dart';
+import 'services/wallpaper_service.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/sync_screen.dart';
 import 'theme.dart';
@@ -22,6 +23,19 @@ void main() async {
 
   final storage = StorageService();
   await storage.init();
+
+  // Auto-enable lock screen display so the app shows over the lock screen
+  // at all times — users shouldn't need to open the app first.
+  WallpaperService.setShowOnLockScreen(true);
+
+  // Auto-enable wallpaper updates if not yet prompted (default on)
+  if (!storage.autoWallpaperPrompted) {
+    await storage.setAutoWallpaperPrompted(true);
+    await storage.setAutoUpdateWallpaper(true);
+  }
+
+  // Request notification permission early so lock screen notifications work
+  await LockScreenService.requestPermissions();
 
   runApp(LockSyncApp(storage: storage));
 }
@@ -49,9 +63,43 @@ class LockSyncApp extends StatelessWidget {
 }
 
 /// Decides the initial screen based on saved session state.
-class _InitialRoute extends StatelessWidget {
+class _InitialRoute extends StatefulWidget {
   final StorageService storage;
   const _InitialRoute({required this.storage});
+
+  @override
+  State<_InitialRoute> createState() => _InitialRouteState();
+}
+
+class _InitialRouteState extends State<_InitialRoute> {
+  @override
+  void initState() {
+    super.initState();
+    // Auto-start the background service when the app launches with an
+    // existing pair session — keeps the lock screen updated even if the
+    // user doesn't interact with the app.
+    _autoStartBackgroundService();
+  }
+
+  Future<void> _autoStartBackgroundService() async {
+    final s = widget.storage;
+    if (s.isPaired &&
+        s.accessToken != null &&
+        s.pairId != null &&
+        s.partnerId != null) {
+      await LockScreenService.start(
+        serverUrl: const String.fromEnvironment(
+          'WS_URL',
+          defaultValue: 'wss://locksync.fireydev.com',
+        ),
+        accessToken: s.accessToken!,
+        refreshToken: s.refreshToken ?? '',
+        deviceId: s.getDeviceId(),
+        pairId: s.pairId!,
+        partnerId: s.partnerId!,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +113,7 @@ class _InitialRoute extends StatelessWidget {
     // Stored session exists (reconnecting after close / network drop) →
     // go to sync so it can show the reconnecting banner rather than
     // landing on the "Pair Devices" welcome screen.
-    if (storage.isPaired) {
+    if (widget.storage.isPaired) {
       return const SyncScreen();
     }
 
