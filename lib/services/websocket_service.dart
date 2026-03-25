@@ -140,6 +140,15 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
           _widgetSyncController.add(payload);
           notifyListeners();
           break;
+        case 'moment':
+          // Received a moment from partner — persist and forward to UI.
+          final momentData = Map<String, dynamic>.from(payload);
+          final existing = storage.getMoments();
+          existing.insert(0, momentData);
+          storage.setMoments(existing);
+          _widgetSyncController.add(payload);
+          notifyListeners();
+          break;
       }
     });
   }
@@ -406,6 +415,14 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
           storage.setCountdowns(
               List<Map<String, dynamic>>.from(countdownItems));
         }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+      case 'moment':
+        final momentData = Map<String, dynamic>.from(payload);
+        final existing = storage.getMoments();
+        existing.insert(0, momentData);
+        storage.setMoments(existing);
         _widgetSyncController.add(payload);
         notifyListeners();
         break;

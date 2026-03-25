@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/websocket_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
+import 'moments_screen.dart';
 
 // ─── Widget Drawer (FAB bottom sheet) ────────────────────────────────
 class WidgetDrawer extends StatelessWidget {
@@ -92,6 +93,19 @@ class WidgetDrawer extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const CountdownScreen()),
+                );
+              },
+            ),
+            _WidgetOption(
+              icon: Icons.photo_camera_rounded,
+              title: 'Moments',
+              subtitle: 'Share photos & videos that disappear after viewing',
+              color: Colors.pink,
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MomentsScreen()),
                 );
               },
             ),
@@ -824,84 +838,113 @@ class _RemindersScreenState extends State<RemindersScreen> {
                         itemBuilder: (ctx, i) {
                           final r = _reminders[i];
                           final dismissed = r['dismissed'] as bool? ?? false;
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: dismissed
-                                  ? Colors.white.withValues(alpha: 0.03)
-                                  : Colors.blue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: dismissed
-                                    ? Colors.white.withValues(alpha: 0.05)
-                                    : Colors.blue.withValues(alpha: 0.2),
-                              ),
+                          return Dismissible(
+                            key: ValueKey('$i-${r['message']}'),
+                            direction: DismissDirection.endToStart,
+                            onDismissed: (_) {
+                              setState(() => _reminders.removeAt(i));
+                              _saveAndSync();
+                            },
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 20),
+                              child: const Icon(Icons.delete_rounded,
+                                  color: Colors.red),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.notifications_active_rounded,
-                                      color: dismissed
-                                          ? Colors.white24
-                                          : Colors.blue,
-                                      size: 18,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'From ${r['setBy'] ?? 'Partner'}',
-                                      style: TextStyle(
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: dismissed
+                                    ? Colors.white.withValues(alpha: 0.03)
+                                    : Colors.blue.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: dismissed
+                                      ? Colors.white.withValues(alpha: 0.05)
+                                      : Colors.blue.withValues(alpha: 0.2),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.notifications_active_rounded,
                                         color: dismissed
                                             ? Colors.white24
                                             : Colors.blue,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
+                                        size: 18,
                                       ),
-                                    ),
-                                    const Spacer(),
-                                    if (!dismissed)
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'From ${r['setBy'] ?? 'Partner'}',
+                                        style: TextStyle(
+                                          color: dismissed
+                                              ? Colors.white24
+                                              : Colors.blue,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      if (!dismissed)
+                                        GestureDetector(
+                                          onTap: () {
+                                            setState(
+                                                () => r['dismissed'] = true);
+                                            _saveAndSync();
+                                          },
+                                          child: const Icon(
+                                            Icons.check_circle_outline_rounded,
+                                            color: Colors.blue,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      const SizedBox(width: 4),
                                       GestureDetector(
                                         onTap: () {
                                           setState(
-                                              () => r['dismissed'] = true);
+                                              () => _reminders.removeAt(i));
                                           _saveAndSync();
                                         },
-                                        child: const Icon(
-                                          Icons.check_circle_outline_rounded,
-                                          color: Colors.blue,
-                                          size: 22,
+                                        child: Icon(
+                                          Icons.delete_outline_rounded,
+                                          color: Colors.white
+                                              .withValues(alpha: 0.3),
+                                          size: 20,
                                         ),
                                       ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  r['message'] as String,
-                                  style: TextStyle(
-                                    color: dismissed
-                                        ? Colors.white30
-                                        : Colors.white,
-                                    fontSize: 16,
-                                    decoration: dismissed
-                                        ? TextDecoration.lineThrough
-                                        : null,
+                                    ],
                                   ),
-                                ),
-                                if (r['date'] != null) ...[
                                   const SizedBox(height: 8),
                                   Text(
-                                    DateFormat('MMM d, y h:mm a')
-                                        .format(DateTime.parse(r['date'])),
+                                    r['message'] as String,
                                     style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.4),
-                                      fontSize: 12,
+                                      color: dismissed
+                                          ? Colors.white30
+                                          : Colors.white,
+                                      fontSize: 16,
+                                      decoration: dismissed
+                                          ? TextDecoration.lineThrough
+                                          : null,
                                     ),
                                   ),
+                                  if (r['date'] != null) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      DateFormat('MMM d, y h:mm a')
+                                          .format(DateTime.parse(r['date'])),
+                                      style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.4),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           );
                         },
