@@ -22,6 +22,7 @@ class StorageService {
   static const _keyWatchlist = 'locksync_watchlist';
   static const _keyReminders = 'locksync_reminders';
   static const _keyCountdowns = 'locksync_countdowns';
+  static const _keyMoments = 'locksync_moments';
 
   late SharedPreferences _prefs;
 
@@ -163,6 +164,17 @@ class StorageService {
 
   Future<void> setCountdowns(List<Map<String, dynamic>> list) async {
     await _prefs.setString(_keyCountdowns, jsonEncode(list));
+  }
+
+  // Moments (received image/video moments with view-count tracking)
+  List<Map<String, dynamic>> getMoments() {
+    final raw = _prefs.getString(_keyMoments);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> setMoments(List<Map<String, dynamic>> list) async {
+    await _prefs.setString(_keyMoments, jsonEncode(list));
   }
 
   Future<void> saveSession({

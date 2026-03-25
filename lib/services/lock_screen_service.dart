@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'canvas_renderer.dart';
+import 'wallpaper_service.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // LockScreen Background Service
@@ -425,15 +426,22 @@ void _backgroundMain(ServiceInstance service) async {
                         'bg_last_canvas_json',
                         jsonEncode(canvasData),
                       );
-                      // Render the canvas to a PNG and save it so the main
-                      // isolate can apply it as the lock screen wallpaper the
-                      // next time the screen turns on (user glances at phone).
+                      // Render the canvas to PNG and set it as the lock
+                      // screen wallpaper immediately from the background engine.
+                      // WallpaperPlugin is registered with this engine via
+                      // MainApplication so the MethodChannel call succeeds
+                      // even while the phone is locked — no app open needed.
                       try {
                         final bytes = await CanvasRenderer.renderToBytes(
                           Map<String, dynamic>.from(
                               canvasData as Map<Object?, Object?>),
                         );
                         if (bytes != null) {
+                          // Apply directly — this updates the lock screen now.
+                          await WallpaperService.setWallpaperSilent(bytes);
+
+                          // Also persist as a fallback for first cold-boot
+                          // before WallpaperPlugin has been registered.
                           final dir = await getTemporaryDirectory();
                           final file =
                               File('${dir.path}/locksync_bg_wallpaper.png');
