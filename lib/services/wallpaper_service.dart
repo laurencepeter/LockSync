@@ -153,6 +153,16 @@ class WallpaperService {
     }
   }
 
+  /// Allow the activity to display over the Android lock screen.
+  /// Call with [show] = true so the canvas (or a full-screen notification)
+  /// can appear without the user needing to unlock first.
+  static Future<void> setShowOnLockScreen(bool show) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('setShowOnLockScreen', {'show': show});
+    } catch (_) {}
+  }
+
   /// Save the latest canvas image to gallery (for iOS "refresh & save")
   static Future<void> saveToGallery(
     Uint8List imageBytes, {

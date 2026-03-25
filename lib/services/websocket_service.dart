@@ -98,10 +98,21 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _handleAppResumed();
+    } else if (state == AppLifecycleState.paused ||
+               state == AppLifecycleState.detached) {
+      _handleAppBackgrounded();
     }
   }
 
   void _handleAppResumed() {
+    // Pause the background service's WebSocket first so the server only sees
+    // one active connection per device. Without this, the server closes the
+    // main isolate's connection when both try to authenticate simultaneously,
+    // which is what causes the "boot out" during canvas editing.
+    if (storage.isPaired) {
+      LockScreenService.pause();
+    }
+
     if (_status == ConnectionStatus.disconnected ||
         (_channel == null && storage.isPaired)) {
       _isReconnecting = true;
@@ -113,6 +124,15 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
           notifyListeners();
         });
       });
+    }
+  }
+
+  void _handleAppBackgrounded() {
+    // Hand the WebSocket back to the background service so lock screen
+    // notifications and auto-wallpaper updates keep working when the
+    // app is not in the foreground.
+    if (storage.isPaired) {
+      LockScreenService.resume();
     }
   }
 

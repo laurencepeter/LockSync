@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -65,6 +66,15 @@ class _CanvasScreenState extends State<CanvasScreen> {
   void initState() {
     super.initState();
     _loadCanvasState();
+    // Allow the canvas screen to show over the Android lock screen so users
+    // can view and edit without unlocking. Reverted when leaving the screen.
+    WallpaperService.setShowOnLockScreen(true);
+  }
+
+  @override
+  void dispose() {
+    WallpaperService.setShowOnLockScreen(false);
+    super.dispose();
   }
 
   void _loadCanvasState() {
@@ -588,8 +598,8 @@ class _CanvasScreenState extends State<CanvasScreen> {
                       // Background image
                       if (_canvasState.backgroundImagePath != null)
                         Positioned.fill(
-                          child: Image.asset(
-                            _canvasState.backgroundImagePath!,
+                          child: Image.file(
+                            File(_canvasState.backgroundImagePath!),
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => const SizedBox(),
                           ),
