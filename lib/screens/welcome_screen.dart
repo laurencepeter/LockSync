@@ -6,6 +6,7 @@ import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import '../widgets/pulse_ring.dart';
 import 'pairing_screen.dart';
+import 'sync_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -101,6 +102,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     final isConnecting = ws.status == ConnectionStatus.connecting;
     final isConnected = ws.status == ConnectionStatus.connected ||
         ws.status == ConnectionStatus.paired;
+    final isStoredPaired = ws.storage.isPaired;
 
     return Scaffold(
       body: AnimatedGradientBg(
@@ -254,21 +256,44 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
                 const SizedBox(height: 24),
 
-                // Pair button
+                // Primary action button
                 FadeTransition(
                   opacity: _buttonFadeAnim,
                   child: SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed:
-                          isConnected ? () => _navigateToPairing(context) : null,
-                      child: const Row(
+                      onPressed: isConnected
+                          ? () {
+                              if (isStoredPaired) {
+                                // Already paired — go straight to sync screen
+                                Navigator.of(context).pushAndRemoveUntil(
+                                  MaterialPageRoute(
+                                      builder: (_) => const SyncScreen()),
+                                  (route) => false,
+                                );
+                              } else {
+                                _navigateToPairing(context);
+                              }
+                            }
+                          : isStoredPaired
+                              ? () => ws.connect()
+                              : null,
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.link_rounded, size: 22),
-                          SizedBox(width: 10),
-                          Text('Pair Your Devices'),
+                          Icon(
+                            isStoredPaired
+                                ? Icons.sync_rounded
+                                : Icons.link_rounded,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(isStoredPaired
+                              ? isConnecting
+                                  ? 'Connecting...'
+                                  : 'Reconnect'
+                              : 'Pair Your Devices'),
                         ],
                       ),
                     ),
@@ -277,8 +302,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
                 const SizedBox(height: 16),
 
-                // Reconnect button when disconnected
-                if (!isConnected && !isConnecting)
+                // Retry connection button when truly disconnected and not paired
+                if (!isConnected && !isConnecting && !isStoredPaired)
                   FadeTransition(
                     opacity: _buttonFadeAnim,
                     child: SizedBox(

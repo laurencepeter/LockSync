@@ -45,6 +45,10 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _wallpaperDebounce;
   StreamSubscription? _bgServiceSub;
 
+  // Foreground tracking — used to skip expensive canvas renders while the
+  // app is in background (the background-service isolate handles those).
+  bool _isInForeground = true;
+
   // Fired when the app should show the one-time auto-wallpaper permission dialog
   final _wallpaperPromptController = StreamController<void>.broadcast();
   Stream<void> get onWallpaperPromptNeeded => _wallpaperPromptController.stream;
@@ -97,9 +101,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _isInForeground = true;
       _handleAppResumed();
     } else if (state == AppLifecycleState.paused ||
                state == AppLifecycleState.detached) {
+      _isInForeground = false;
       _handleAppBackgrounded();
     }
   }
@@ -117,13 +123,9 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         (_channel == null && storage.isPaired)) {
       _isReconnecting = true;
       notifyListeners();
-      connect().then((_) {
-        // After reconnect, delay briefly then clear reconnecting flag
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _isReconnecting = false;
-          notifyListeners();
-        });
-      });
+      connect();
+      // _isReconnecting is cleared in the 'authenticated' message handler
+      // once the server confirms the session is restored.
     }
   }
 
@@ -195,6 +197,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         break;
 
       case 'authenticated':
+        _isReconnecting = false;
         _pairId = msg['pairId'] as String;
         _partnerId = msg['partnerId'] as String;
         _partnerOnline = msg['partnerOnline'] as bool? ?? false;
@@ -327,10 +330,16 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   /// Debounced wallpaper update — renders the canvas 1.5 s after the last
   /// incoming stroke so we don't set the wallpaper on every single point
   /// while the partner is actively drawing.
+  ///
+  /// Skipped while the app is in the background because the background-service
+  /// isolate already handles wallpaper updates from its own WebSocket — this
+  /// avoids duplicate renders and saves CPU/data.
   void scheduleWallpaperUpdate(Map<String, dynamic> canvasData) {
+    if (!_isInForeground) return;
     _wallpaperDebounce?.cancel();
     _wallpaperDebounce =
         Timer(const Duration(milliseconds: 1500), () async {
+      if (!_isInForeground) return; // Re-check in case state changed
       final bytes = await CanvasRenderer.renderToBytes(canvasData);
       if (bytes != null) {
         await WallpaperService.setWallpaperSilent(bytes);
@@ -514,6 +523,10 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _channel = null;
     _status = ConnectionStatus.disconnected;
     _partnerOnline = false;
+    // Show reconnecting banner in SyncScreen while we attempt to restore
+    if (storage.isPaired) {
+      _isReconnecting = true;
+    }
     notifyListeners();
 
     final delay = Duration(seconds: (1 << _reconnectAttempts).clamp(1, 30));

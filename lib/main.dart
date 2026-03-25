@@ -57,8 +57,15 @@ class _InitialRoute extends StatelessWidget {
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
 
-    // If already paired from a previous session, go straight to sync
+    // Already authenticated in this session → go straight to sync
     if (ws.status == ConnectionStatus.paired) {
+      return const SyncScreen();
+    }
+
+    // Stored session exists (reconnecting after close / network drop) →
+    // go to sync so it can show the reconnecting banner rather than
+    // landing on the "Pair Devices" welcome screen.
+    if (storage.isPaired) {
       return const SyncScreen();
     }
 
