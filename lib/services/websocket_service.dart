@@ -85,23 +85,58 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _listenToBackgroundService();
   }
 
-  /// Relay canvas updates that arrive via the background service isolate
+  /// Relay sync events that arrive via the background service isolate
   /// (i.e. when the phone is locked and the main WebSocket is inactive).
   void _listenToBackgroundService() {
     _bgServiceSub = LockScreenService.onMessage.listen((msg) {
       final payload = msg['payload'] as Map<String, dynamic>?;
       if (payload == null) return;
       final syncType = payload['syncType'] as String?;
-      if (syncType == 'canvas') {
-        final canvasData = payload['canvasData'] as Map<String, dynamic>?;
-        if (canvasData != null) {
-          _partnerCanvasData = canvasData;
-          _partnerText = (payload['text'] as String?) ?? _partnerText;
-          storage.setCanvasState(jsonEncode(canvasData));
-          _canvasSyncController.add(canvasData);
+
+      switch (syncType) {
+        case 'canvas':
+          final canvasData = payload['canvasData'] as Map<String, dynamic>?;
+          if (canvasData != null) {
+            _partnerCanvasData = canvasData;
+            _partnerText = (payload['text'] as String?) ?? _partnerText;
+            storage.setCanvasState(jsonEncode(canvasData));
+            _canvasSyncController.add(canvasData);
+            notifyListeners();
+            _maybeAutoUpdateWallpaper(canvasData);
+          }
+          break;
+        case 'grocery':
+          final gi = payload['items'];
+          if (gi is List) {
+            storage.setGroceryList(List<Map<String, dynamic>>.from(gi));
+          }
+          _widgetSyncController.add(payload);
           notifyListeners();
-          _maybeAutoUpdateWallpaper(canvasData);
-        }
+          break;
+        case 'watchlist':
+          final wi = payload['items'];
+          if (wi is List) {
+            storage.setWatchlist(List<Map<String, dynamic>>.from(wi));
+          }
+          _widgetSyncController.add(payload);
+          notifyListeners();
+          break;
+        case 'reminder':
+          final ri = payload['items'];
+          if (ri is List) {
+            storage.setReminders(List<Map<String, dynamic>>.from(ri));
+          }
+          _widgetSyncController.add(payload);
+          notifyListeners();
+          break;
+        case 'countdown':
+          final ci = payload['items'];
+          if (ci is List) {
+            storage.setCountdowns(List<Map<String, dynamic>>.from(ci));
+          }
+          _widgetSyncController.add(payload);
+          notifyListeners();
+          break;
       }
     });
   }
@@ -311,10 +346,38 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         _reactionController.add(payload);
         break;
       case 'grocery':
+        final groceryItems = payload['items'];
+        if (groceryItems is List) {
+          storage.setGroceryList(
+              List<Map<String, dynamic>>.from(groceryItems));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
       case 'watchlist':
+        final watchlistItems = payload['items'];
+        if (watchlistItems is List) {
+          storage.setWatchlist(
+              List<Map<String, dynamic>>.from(watchlistItems));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
       case 'reminder':
+        final reminderItems = payload['items'];
+        if (reminderItems is List) {
+          storage.setReminders(
+              List<Map<String, dynamic>>.from(reminderItems));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
       case 'countdown':
-        // Widget data syncs — forward to listeners
+        final countdownItems = payload['items'];
+        if (countdownItems is List) {
+          storage.setCountdowns(
+              List<Map<String, dynamic>>.from(countdownItems));
+        }
         _widgetSyncController.add(payload);
         notifyListeners();
         break;
