@@ -53,6 +53,15 @@ class _SyncScreenState extends State<SyncScreen>
       _nudgeSub = ws.onNudge.listen((_) => _onNudgeReceived());
       _wallpaperPromptSub =
           ws.onWallpaperPromptNeeded.listen((_) => _showWallpaperPermissionDialog());
+
+      // Ask lock screen permission proactively (once, on first ever launch
+      // after pairing) rather than waiting for the first canvas update.
+      if (!ws.storage.autoWallpaperPrompted) {
+        // Small delay so the screen has finished animating in first.
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) _showWallpaperPermissionDialog();
+        });
+      }
     });
   }
 
@@ -148,9 +157,10 @@ class _SyncScreenState extends State<SyncScreen>
           ],
         ),
         content: const Text(
-          'Allow LockSync to automatically update your lock screen wallpaper '
-          'whenever your partner draws, types, or adds a photo?\n\n'
-          'You can change this anytime in Settings.',
+          'LockSync can keep your lock screen updated with your shared canvas '
+          'automatically — so every time your partner draws or adds a photo, '
+          'it appears on your lock screen.\n\n'
+          'You can turn this off anytime in Settings → Lock Screen.',
           style: TextStyle(color: Colors.white70, height: 1.5),
         ),
         actions: [
@@ -331,11 +341,15 @@ class _SyncScreenState extends State<SyncScreen>
     final partnerName = ws.partnerDisplayName ?? 'Partner';
     final partnerMood = ws.partnerMood;
 
-    // If we lost pairing, go back
-    if (ws.status != ConnectionStatus.paired &&
-        ws.status != ConnectionStatus.connecting &&
-        ws.status != ConnectionStatus.connected) {
+    // Navigate to welcome only when the session is explicitly cleared
+    // (e.g. server rejects token / manual unpair). A temporary disconnect
+    // while still stored-as-paired must NOT boot the user — SyncScreen shows
+    // its own reconnecting banner instead.
+    if (!ws.storage.isPaired &&
+        (ws.status == ConnectionStatus.connected ||
+         ws.status == ConnectionStatus.disconnected)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const WelcomeScreen()),
           (route) => false,
@@ -622,6 +636,7 @@ class _SyncScreenState extends State<SyncScreen>
                   showModalBottomSheet(
                     context: context,
                     backgroundColor: Colors.transparent,
+                    isScrollControlled: true,
                     builder: (_) => const WidgetDrawer(),
                   );
                 },

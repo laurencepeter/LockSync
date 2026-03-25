@@ -74,8 +74,10 @@ class StorageService {
   }
 
   // Settings
+  // Defaults to true — lock screen updates are on by default after first
+  // permission dialog. Users can turn this off in Settings → Lock Screen.
   bool get autoUpdateWallpaper =>
-      _prefs.getBool(_keyAutoUpdateWallpaper) ?? false;
+      _prefs.getBool(_keyAutoUpdateWallpaper) ?? true;
   Future<void> setAutoUpdateWallpaper(bool value) async {
     await _prefs.setBool(_keyAutoUpdateWallpaper, value);
   }
