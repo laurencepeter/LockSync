@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'services/canvas_renderer.dart';
 import 'services/storage_service.dart';
 import 'services/websocket_service.dart';
 import 'services/lock_screen_service.dart';
@@ -37,7 +39,31 @@ void main() async {
   // Request notification permission early so lock screen notifications work
   await LockScreenService.requestPermissions();
 
+  // If there's saved canvas data, render and set it as the lock screen
+  // wallpaper immediately on startup — this ensures the lock screen shows
+  // the shared canvas even if the app wasn't recently in the foreground.
+  if (storage.isPaired && storage.autoUpdateWallpaper) {
+    _setInitialWallpaper(storage);
+  }
+
   runApp(LockSyncApp(storage: storage));
+}
+
+/// Render the last-known canvas state and set it as the lock screen wallpaper.
+/// Runs async and doesn't block startup — the wallpaper updates in the
+/// background so the lock screen is always current even after a cold start.
+Future<void> _setInitialWallpaper(StorageService storage) async {
+  try {
+    final json = storage.canvasState;
+    if (json == null) return;
+    final canvasData = jsonDecode(json) as Map<String, dynamic>;
+    final bytes = await CanvasRenderer.renderToBytes(canvasData);
+    if (bytes != null) {
+      await WallpaperService.setWallpaperSilent(bytes);
+    }
+  } catch (_) {
+    // Best-effort — don't block app startup
+  }
 }
 
 class LockSyncApp extends StatelessWidget {
