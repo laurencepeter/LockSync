@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -46,6 +47,11 @@ class _CanvasScreenState extends State<CanvasScreen> {
   // Sticker dragging
   int? _draggingStickerIndex;
 
+  // Live sync from partner
+  StreamSubscription? _canvasSyncSub;
+  Timer? _sendThrottle;
+  bool _isDrawing = false;
+
   static const List<String> _fontOptions = [
     'Inter',
     'Caveat',
@@ -66,15 +72,29 @@ class _CanvasScreenState extends State<CanvasScreen> {
   void initState() {
     super.initState();
     _loadCanvasState();
-    // Allow the canvas screen to show over the Android lock screen so users
-    // can view and edit without unlocking. Reverted when leaving the screen.
-    WallpaperService.setShowOnLockScreen(true);
+
+    // Listen for live partner canvas updates
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ws = context.read<WebSocketService>();
+      _canvasSyncSub = ws.onCanvasSync.listen(_onPartnerCanvasUpdate);
+    });
   }
 
   @override
   void dispose() {
-    WallpaperService.setShowOnLockScreen(false);
+    _canvasSyncSub?.cancel();
+    _sendThrottle?.cancel();
     super.dispose();
+  }
+
+  /// When partner sends canvas data, update the local canvas if the user
+  /// is not in the middle of a stroke (to avoid jarring mid-draw resets).
+  void _onPartnerCanvasUpdate(Map<String, dynamic> data) {
+    if (_isDrawing) return;
+    final incoming = CanvasState.fromJson(data);
+    setState(() {
+      _canvasState = incoming;
+    });
   }
 
   void _loadCanvasState() {
@@ -126,6 +146,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
   void _onPanStart(DragStartDetails details) {
     if (_currentTool == CanvasTool.draw || _currentTool == CanvasTool.eraser) {
       _pushUndo();
+      _isDrawing = true;
       _currentStrokePoints = [details.localPosition];
     } else if (_currentTool == CanvasTool.select) {
       _tryStartDrag(details.localPosition);
@@ -137,6 +158,8 @@ class _CanvasScreenState extends State<CanvasScreen> {
       setState(() {
         _currentStrokePoints.add(details.localPosition);
       });
+      // Throttled live sync so partner sees strokes as they're drawn
+      _throttledSync();
     } else if (_currentTool == CanvasTool.select) {
       _updateDrag(details.localPosition);
     }
@@ -156,10 +179,35 @@ class _CanvasScreenState extends State<CanvasScreen> {
         ));
         _currentStrokePoints = [];
       });
+      _isDrawing = false;
+      _sendThrottle?.cancel();
       _saveAndSync();
     } else if (_currentTool == CanvasTool.select) {
       _endDrag();
     }
+  }
+
+  /// Send canvas data at most every 300ms during active drawing so the
+  /// partner sees strokes appearing in real-time.
+  void _throttledSync() {
+    if (_sendThrottle?.isActive ?? false) return;
+    _sendThrottle = Timer(const Duration(milliseconds: 300), () {
+      // Build a temporary state that includes the in-progress stroke
+      final tempState = CanvasState.fromJson(_canvasState.toJson());
+      if (_currentStrokePoints.isNotEmpty) {
+        tempState.strokes.add(CanvasStroke(
+          points: List.from(_currentStrokePoints),
+          color: _currentTool == CanvasTool.eraser
+              ? 0xFF0F0F1A
+              : _currentColor.value,
+          thickness:
+              _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
+          isEraser: _currentTool == CanvasTool.eraser,
+        ));
+      }
+      final ws = context.read<WebSocketService>();
+      ws.sendCanvasData(tempState.toJson());
+    });
   }
 
   void _tryStartDrag(Offset pos) {

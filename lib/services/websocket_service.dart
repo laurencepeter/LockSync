@@ -53,6 +53,12 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   final _wallpaperPromptController = StreamController<void>.broadcast();
   Stream<void> get onWallpaperPromptNeeded => _wallpaperPromptController.stream;
 
+  // Canvas sync stream — fired whenever partner canvas data arrives
+  final _canvasSyncController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get onCanvasSync =>
+      _canvasSyncController.stream;
+
   // Reactions stream
   final _reactionController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -91,6 +97,8 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         if (canvasData != null) {
           _partnerCanvasData = canvasData;
           _partnerText = (payload['text'] as String?) ?? _partnerText;
+          storage.setCanvasState(jsonEncode(canvasData));
+          _canvasSyncController.add(canvasData);
           notifyListeners();
           _maybeAutoUpdateWallpaper(canvasData);
         }
@@ -277,6 +285,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         _partnerText = (payload['text'] as String?) ?? _partnerText;
         notifyListeners();
         if (_partnerCanvasData != null) {
+          // Save partner canvas to local storage so preview and canvas
+          // screen always have the latest shared state.
+          storage.setCanvasState(jsonEncode(_partnerCanvasData));
+          // Fire the canvas sync stream for live updates
+          _canvasSyncController.add(_partnerCanvasData!);
           _maybeAutoUpdateWallpaper(_partnerCanvasData!);
         }
         break;
@@ -314,13 +327,13 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   Stream<Map<String, dynamic>> get onWidgetSync =>
       _widgetSyncController.stream;
 
-  /// Called on every canvas sync. Shows the one-time permission prompt if
-  /// needed, otherwise schedules a debounced wallpaper render+set.
+  /// Called on every canvas sync. Auto-enables wallpaper updates on first
+  /// use (no dialog needed) and schedules a debounced wallpaper render+set.
   void _maybeAutoUpdateWallpaper(Map<String, dynamic> canvasData) {
     if (!storage.autoWallpaperPrompted) {
-      // First time: ask the user if they want this feature
-      _wallpaperPromptController.add(null);
-      return;
+      // Auto-enable lock screen updates — no dialog, just works.
+      storage.setAutoWallpaperPrompted(true);
+      storage.setAutoUpdateWallpaper(true);
     }
     if (storage.autoUpdateWallpaper) {
       scheduleWallpaperUpdate(canvasData);
@@ -555,6 +568,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _nudgeController.close();
     _widgetSyncController.close();
     _wallpaperPromptController.close();
+    _canvasSyncController.close();
     _wallpaperDebounce?.cancel();
     _bgServiceSub?.cancel();
     disconnect();
