@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+
+import 'canvas_renderer.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // LockScreen Background Service
@@ -406,20 +410,40 @@ void _backgroundMain(ServiceInstance service) async {
                   }
                 }
 
-                // Persist canvas JSON so we can use it if the main isolate
-                // isn't running when this arrives.
+                // Persist canvas JSON and render the wallpaper so the lock
+                // screen stays up to date even while the app is sleeping.
                 if (syncType == 'canvas') {
                   final canvasData = payload['canvasData'];
                   if (canvasData != null) {
                     final prefs = await SharedPreferences.getInstance();
+                    // Default to true — matches StorageService.autoUpdateWallpaper
                     final autoUpdate = prefs.getBool(
                             'locksync_auto_update_wallpaper') ??
-                        false;
+                        true;
                     if (autoUpdate) {
                       await prefs.setString(
                         'bg_last_canvas_json',
                         jsonEncode(canvasData),
                       );
+                      // Render the canvas to a PNG and save it so the main
+                      // isolate can apply it as the lock screen wallpaper the
+                      // next time the screen turns on (user glances at phone).
+                      try {
+                        final bytes = await CanvasRenderer.renderToBytes(
+                          Map<String, dynamic>.from(
+                              canvasData as Map<Object?, Object?>),
+                        );
+                        if (bytes != null) {
+                          final dir = await getTemporaryDirectory();
+                          final file =
+                              File('${dir.path}/locksync_bg_wallpaper.png');
+                          await file.writeAsBytes(bytes);
+                          await prefs.setBool(
+                              'bg_wallpaper_pending', true);
+                        }
+                      } catch (_) {
+                        // Best-effort — don't crash the background service
+                      }
                     }
                   }
                 }

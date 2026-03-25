@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'canvas_renderer.dart';
 import 'lock_screen_service.dart';
@@ -162,6 +165,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       LockScreenService.pause();
     }
 
+    // Apply any wallpaper that the background service rendered while the
+    // phone was sleeping — this is what makes the lock screen update when
+    // the user glances at their phone.
+    _applyPendingWallpaper();
+
     if (_status == ConnectionStatus.disconnected ||
         (_channel == null && storage.isPaired)) {
       _isReconnecting = true;
@@ -169,6 +177,26 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       connect();
       // _isReconnecting is cleared in the 'authenticated' message handler
       // once the server confirms the session is restored.
+    }
+  }
+
+  /// Check if the background service rendered a wallpaper while the app was
+  /// sleeping and apply it now that we're back in the foreground.
+  Future<void> _applyPendingWallpaper() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pending = prefs.getBool('bg_wallpaper_pending') ?? false;
+      if (!pending) return;
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/locksync_bg_wallpaper.png');
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        await WallpaperService.setWallpaperSilent(bytes);
+      }
+      await prefs.setBool('bg_wallpaper_pending', false);
+    } catch (_) {
+      // Best-effort — don't block resume
     }
   }
 
