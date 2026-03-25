@@ -44,10 +44,10 @@ class CanvasRenderer {
       ui.Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
     );
 
-    // Dark background fill
+    // Background fill — colour follows the canvas theme
     canvas.drawRect(
       ui.Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
-      ui.Paint()..color = const ui.Color(0xFF0F0F1A),
+      ui.Paint()..color = _themeToColor(state.theme),
     );
 
     // Background image (loaded from local file path)
@@ -81,6 +81,19 @@ class CanvasRenderer {
     image.dispose();
     picture.dispose();
     return byteData?.buffer.asUint8List();
+  }
+
+  static ui.Color _themeToColor(String theme) {
+    const themes = <String, int>{
+      'default':  0xFF0F0F1A,
+      'midnight': 0xFF000000,
+      'rose':     0xFF1A070F,
+      'ocean':    0xFF071422,
+      'forest':   0xFF071A0F,
+      'sunset':   0xFF1A0F07,
+      'lavender': 0xFF130A1A,
+    };
+    return ui.Color(themes[theme] ?? 0xFF0F0F1A);
   }
 
   static Future<void> _drawBackgroundImage(

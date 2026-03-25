@@ -52,6 +52,98 @@ class _CanvasScreenState extends State<CanvasScreen> {
   Timer? _sendThrottle;
   bool _isDrawing = false;
 
+  static const Map<String, int> _canvasThemes = {
+    'default':  0xFF0F0F1A,
+    'midnight': 0xFF000000,
+    'rose':     0xFF1A070F,
+    'ocean':    0xFF071422,
+    'forest':   0xFF071A0F,
+    'sunset':   0xFF1A0F07,
+    'lavender': 0xFF130A1A,
+  };
+
+  Color _getThemeColor() =>
+      Color(_canvasThemes[_canvasState.theme] ?? 0xFF0F0F1A);
+
+  void _showThemePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Canvas Theme',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: _canvasThemes.entries.map((entry) {
+                  final isSelected = _canvasState.theme == entry.key;
+                  return GestureDetector(
+                    onTap: () {
+                      _pushUndo();
+                      setState(() => _canvasState.theme = entry.key);
+                      _saveAndSync();
+                      Navigator.pop(ctx);
+                    },
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Color(entry.value),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected
+                                  ? LockSyncTheme.primaryColor
+                                  : Colors.white24,
+                              width: isSelected ? 2.5 : 1,
+                            ),
+                          ),
+                          child: isSelected
+                              ? const Icon(Icons.check_rounded,
+                                  color: Colors.white, size: 24)
+                              : null,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          entry.key[0].toUpperCase() +
+                              entry.key.substring(1),
+                          style: TextStyle(
+                            color: isSelected
+                                ? LockSyncTheme.primaryColor
+                                : Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   static const List<String> _fontOptions = [
     'Inter',
     'Caveat',
@@ -566,6 +658,9 @@ class _CanvasScreenState extends State<CanvasScreen> {
                 case 'wallpaper':
                   _captureAndSetWallpaper();
                   break;
+                case 'theme':
+                  _showThemePicker();
+                  break;
                 case 'photo':
                   _pickImage();
                   break;
@@ -587,6 +682,17 @@ class _CanvasScreenState extends State<CanvasScreen> {
                     Icon(Icons.wallpaper_rounded, color: Colors.white70),
                     SizedBox(width: 12),
                     Text('Set as Lock Screen',
+                        style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'theme',
+                child: Row(
+                  children: [
+                    Icon(Icons.color_lens_rounded, color: Colors.white70),
+                    SizedBox(width: 12),
+                    Text('Canvas Theme',
                         style: TextStyle(color: Colors.white)),
                   ],
                 ),
@@ -639,8 +745,9 @@ class _CanvasScreenState extends State<CanvasScreen> {
                 onPanUpdate: _onPanUpdate,
                 onPanEnd: _onPanEnd,
                 onTapUp: _onTapCanvas,
-                child: Container(
-                  color: const Color(0xFF0F0F1A),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 400),
+                  color: _getThemeColor(),
                   child: Stack(
                     children: [
                       // Background image

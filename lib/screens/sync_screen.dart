@@ -74,6 +74,19 @@ class _SyncScreenState extends State<SyncScreen>
     });
   }
 
+  static const Map<String, int> _themeColors = {
+    'default':  0xFF0F0F1A,
+    'midnight': 0xFF000000,
+    'rose':     0xFF1A070F,
+    'ocean':    0xFF071422,
+    'forest':   0xFF071A0F,
+    'sunset':   0xFF1A0F07,
+    'lavender': 0xFF130A1A,
+  };
+
+  Color _previewThemeColor() =>
+      Color(_themeColors[_previewCanvasState.theme] ?? 0xFF0F0F1A);
+
   void _loadCanvasPreview() {
     final ws = context.read<WebSocketService>();
     CanvasState? loaded;
@@ -163,25 +176,29 @@ class _SyncScreenState extends State<SyncScreen>
 
   void _onNudgeReceived() {
     HapticFeedback.heavyImpact();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.vibration_rounded, color: Colors.white),
-              const SizedBox(width: 12),
-              Text(
-                '${context.read<WebSocketService>().partnerDisplayName ?? "Partner"} nudged you!',
-                style: const TextStyle(color: Colors.white),
-              ),
-            ],
-          ),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: LockSyncTheme.primaryColor,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+    if (!mounted) return;
+    final partnerName =
+        context.read<WebSocketService>().partnerDisplayName ?? 'Partner';
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 350),
+      pageBuilder: (ctx, _, __) => _NudgePopup(partnerName: partnerName),
+      transitionBuilder: (ctx, anim, _, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: anim, curve: Curves.elasticOut),
+          child: FadeTransition(opacity: anim, child: child),
+        );
+      },
+    );
+    // Auto-dismiss after 3 s
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).maybePop();
+      }
+    });
   }
 
   void _sendReaction(String emoji, TapUpDetails details) {
@@ -562,11 +579,12 @@ class _SyncScreenState extends State<SyncScreen>
           localPosition: details.localPosition,
         ));
       },
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
         margin: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
-          color: const Color(0xFF0F0F1A),
+          color: _previewThemeColor(),
           border: Border.all(
             color: LockSyncTheme.primaryColor.withValues(alpha: 0.2),
           ),
@@ -1080,6 +1098,76 @@ class _PartnerMessageCard extends StatelessWidget {
           fontSize: 20,
           height: 1.6,
           fontWeight: FontWeight.w400,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Nudge Popup ─────────────────────────────────────────────────────
+class _NudgePopup extends StatelessWidget {
+  final String partnerName;
+  const _NudgePopup({required this.partnerName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: GestureDetector(
+        onTap: () => Navigator.of(context, rootNavigator: true).maybePop(),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A2E),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: LockSyncTheme.primaryColor.withValues(alpha: 0.5),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: LockSyncTheme.primaryColor.withValues(alpha: 0.35),
+                  blurRadius: 40,
+                  spreadRadius: 4,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('📳', style: TextStyle(fontSize: 60)),
+                const SizedBox(height: 20),
+                Text(
+                  '$partnerName nudged you!',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Say something back!',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.45),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Tap to dismiss',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

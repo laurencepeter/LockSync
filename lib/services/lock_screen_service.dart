@@ -26,8 +26,11 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 const _kNotifChannelService = 'locksync_service';
 const _kNotifChannelMessages = 'locksync_messages';
+const _kNotifChannelNudge = 'locksync_nudge';
 const _kNotifIdService = 1;
 const _kNotifIdMessage = 2;
+const _kNotifIdNudge = 3;
+const _kNotifIdWidget = 4;
 
 // Keys for communicating between main isolate ↔ background isolate
 const _kInvokeStart = 'locksync.start';
@@ -76,8 +79,17 @@ class LockScreenService {
     final androidPlugin =
         _notifs.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
+    const nudgeChannel = AndroidNotificationChannel(
+      _kNotifChannelNudge,
+      'LockSync Nudges',
+      description: 'Nudge alerts from your partner',
+      importance: Importance.max,
+      showBadge: true,
+      playSound: false,
+    );
     await androidPlugin?.createNotificationChannel(serviceChannel);
     await androidPlugin?.createNotificationChannel(messageChannel);
+    await androidPlugin?.createNotificationChannel(nudgeChannel);
 
     // Configure background service
     final service = FlutterBackgroundService();
@@ -226,6 +238,65 @@ void _backgroundMain(ServiceInstance service) async {
     );
   }
 
+  // ── Helper: nudge notification ──
+  Future<void> showNudgeNotif(String partnerName) async {
+    await notifs.show(
+      _kNotifIdNudge,
+      '$partnerName nudged you! 📳',
+      'Tap to open LockSync',
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _kNotifChannelNudge,
+          'LockSync Nudges',
+          importance: Importance.max,
+          priority: Priority.max,
+          visibility: NotificationVisibility.public,
+          autoCancel: true,
+          ongoing: false,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+        ),
+      ),
+    );
+  }
+
+  // ── Helper: widget update notification ──
+  Future<void> showWidgetNotif(
+      String widgetType, String partnerName) async {
+    const labels = <String, String>{
+      'grocery': 'updated the grocery list',
+      'watchlist': 'updated the watchlist',
+      'reminder': 'added a reminder for you',
+      'countdown': 'updated a countdown',
+    };
+    final action = labels[widgetType] ?? 'updated a widget';
+    final title = '$partnerName $action';
+    final body =
+        'Check the ${widgetType[0].toUpperCase()}${widgetType.substring(1)} widget';
+    await notifs.show(
+      _kNotifIdWidget,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _kNotifChannelMessages,
+          'LockSync Messages',
+          importance: Importance.high,
+          priority: Priority.high,
+          visibility: NotificationVisibility.public,
+          autoCancel: true,
+          ongoing: false,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: false,
+        ),
+      ),
+    );
+  }
+
   // ── Helper: update the foreground service notification (Android) ──
   void updateServiceNotif(String content) {
     if (service is AndroidServiceInstance) {
@@ -298,6 +369,40 @@ void _backgroundMain(ServiceInstance service) async {
                       '';
                   if (text.isNotEmpty) {
                     await showMessageNotif(text);
+                  }
+                }
+
+                // Nudge notification
+                if (syncType == 'nudge') {
+                  final prefs = await SharedPreferences.getInstance();
+                  final partnerName =
+                      prefs.getString('locksync_partner_name') ??
+                          'Your partner';
+                  await showNudgeNotif(partnerName);
+                }
+
+                // Widget change notifications
+                if (syncType == 'grocery' ||
+                    syncType == 'watchlist' ||
+                    syncType == 'reminder' ||
+                    syncType == 'countdown') {
+                  final prefs = await SharedPreferences.getInstance();
+                  final partnerName =
+                      prefs.getString('locksync_partner_name') ??
+                          'Your partner';
+                  await showWidgetNotif(syncType, partnerName);
+                  // Also persist widget data so next open shows latest
+                  const widgetKeys = <String, String>{
+                    'grocery': 'locksync_grocery_list',
+                    'watchlist': 'locksync_watchlist',
+                    'reminder': 'locksync_reminders',
+                    'countdown': 'locksync_countdowns',
+                  };
+                  final items = payload['items'];
+                  final storageKey = widgetKeys[syncType];
+                  if (items != null && storageKey != null) {
+                    final prefs2 = await SharedPreferences.getInstance();
+                    await prefs2.setString(storageKey, jsonEncode(items));
                   }
                 }
 
