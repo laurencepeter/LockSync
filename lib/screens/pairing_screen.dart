@@ -410,7 +410,7 @@ class _PairingScreenState extends State<PairingScreen>
                   builder: (context, constraints) {
                     // Calculate width per digit based on available space
                     // 6 digits + 5 gaps (4 small + 1 large)
-                    final totalGap = 8.0 * 4 + 16.0; // 4 small + 1 large gap
+                    const totalGap = 8.0 * 4 + 16.0; // 4 small + 1 large gap
                     final digitWidth =
                         ((constraints.maxWidth - totalGap) / 6).clamp(36.0, 48.0);
                     final digitHeight = digitWidth * 1.27;

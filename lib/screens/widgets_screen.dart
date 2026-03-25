@@ -733,6 +733,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
                         DateTime.now().add(const Duration(days: 365)),
                   );
                   if (date != null) {
+                    if (!ctx.mounted) return;
                     final time = await showTimePicker(
                       context: ctx,
                       initialTime: TimeOfDay.now(),
@@ -1065,7 +1066,7 @@ class _CountdownScreenState extends State<CountdownScreen> {
             ElevatedButton(
               onPressed: () {
                 if (labelController.text.trim().isEmpty ||
-                    selectedDate == null) return;
+                    selectedDate == null) { return; }
                 setState(() {
                   _countdowns.add({
                     'label': labelController.text.trim(),

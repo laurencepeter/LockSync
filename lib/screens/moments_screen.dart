@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
-import '../services/storage_service.dart';
 import '../services/websocket_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
@@ -352,7 +351,7 @@ class _MomentCardState extends State<_MomentCard> {
                         ),
                         const Spacer(),
                         if (!expired) ...[
-                          Icon(Icons.timer_rounded,
+                          const Icon(Icons.timer_rounded,
                               color: Colors.white54, size: 12),
                           const SizedBox(width: 4),
                           Text(
@@ -784,7 +783,6 @@ class _MomentComposerScreenState extends State<MomentComposerScreen> {
   XFile? _pickedFile;
   String _mediaType = 'image';
   bool _nsfw = false;
-  int _viewDuration = 10; // seconds
   int _maxReplays = 1;
   bool _sending = false;
 
@@ -1133,7 +1131,7 @@ class _MomentComposerScreenState extends State<MomentComposerScreen> {
                             Switch(
                               value: _nsfw,
                               onChanged: (v) => setState(() => _nsfw = v),
-                              activeColor: Colors.red,
+                              activeThumbColor: Colors.red,
                             ),
                           ],
                         ),
@@ -1263,7 +1261,7 @@ class _PickBtn extends StatelessWidget {
             Icon(icon, color: LockSyncTheme.primaryColor, size: 18),
             const SizedBox(width: 8),
             Text(label,
-                style: TextStyle(
+                style: const TextStyle(
                     color: LockSyncTheme.primaryColor,
                     fontWeight: FontWeight.w600)),
           ],
