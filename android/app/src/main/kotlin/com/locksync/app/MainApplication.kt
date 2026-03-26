@@ -1,8 +1,6 @@
 package com.locksync.app
 
-import io.flutter.app.FlutterApplication
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.FlutterEngineCache
+import android.app.Application
 
 /**
  * Custom Application class.
@@ -16,5 +14,10 @@ import io.flutter.embedding.engine.FlutterEngineCache
  * [MainActivity.configureFlutterEngine].  From the background isolate, if the
  * platform channel is unavailable the Dart side already catches the error and
  * falls back to persisting the image for the next cold start.
+ *
+ * NOTE: FlutterApplication (io.flutter.app.FlutterApplication) was removed in
+ * Flutter's v2 embedding — extending it causes a ClassNotFoundException crash
+ * at startup.  We extend plain [Application] instead, which is sufficient for
+ * the v2 / v3 embedding used here.
  */
-class MainApplication : FlutterApplication()
+class MainApplication : Application()
