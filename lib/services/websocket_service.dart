@@ -447,9 +447,9 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Debounced wallpaper update — renders the canvas 1.5 s after the last
-  /// incoming stroke so we don't set the wallpaper on every single point
-  /// while the partner is actively drawing.
+  /// Debounced wallpaper update — renders the canvas 800ms after the last
+  /// change so we don't set the wallpaper on every single point while the
+  /// partner is actively drawing.
   ///
   /// Skipped while the app is in the background because the background-service
   /// isolate already handles wallpaper updates from its own WebSocket — this
@@ -458,7 +458,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     if (!_isInForeground) return;
     _wallpaperDebounce?.cancel();
     _wallpaperDebounce =
-        Timer(const Duration(milliseconds: 1500), () async {
+        Timer(const Duration(milliseconds: 800), () async {
       if (!_isInForeground) return; // Re-check in case state changed
       final bytes = await CanvasRenderer.renderToBytes(canvasData);
       if (bytes != null) {
@@ -518,14 +518,17 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
 
   void sendCanvasData(Map<String, dynamic> canvasData, {String? text}) {
     if (_status != ConnectionStatus.paired) return;
+    final payload = {
+      'syncType': 'canvas',
+      'canvasData': canvasData,
+      if (text != null) 'text': text,
+    };
     _send({
       'type': 'sync',
-      'payload': {
-        'syncType': 'canvas',
-        'canvasData': canvasData,
-        if (text != null) 'text': text,
-      },
+      'payload': payload,
     });
+    // Also trigger auto-wallpaper for our own changes
+    _maybeAutoUpdateWallpaper(canvasData);
   }
 
   void _syncDisplayName() {

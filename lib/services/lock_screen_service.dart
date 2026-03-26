@@ -411,6 +411,50 @@ void _backgroundMain(ServiceInstance service) async {
                   }
                 }
 
+                // Moment notification
+                if (syncType == 'moment') {
+                  final prefs = await SharedPreferences.getInstance();
+                  final partnerName =
+                      prefs.getString('locksync_partner_name') ??
+                          'Your partner';
+                  final mediaType =
+                      payload['mediaType'] as String? ?? 'image';
+                  final label =
+                      mediaType == 'video' ? 'a video' : 'a photo';
+                  await notifs.show(
+                    _kNotifIdWidget,
+                    '$partnerName sent you $label',
+                    'Open LockSync to view this moment',
+                    const NotificationDetails(
+                      android: AndroidNotificationDetails(
+                        _kNotifChannelMessages,
+                        'LockSync Messages',
+                        importance: Importance.high,
+                        priority: Priority.high,
+                        visibility: NotificationVisibility.public,
+                        autoCancel: true,
+                        ongoing: false,
+                      ),
+                      iOS: DarwinNotificationDetails(
+                        presentAlert: true,
+                        presentSound: true,
+                      ),
+                    ),
+                  );
+                  // Persist the moment
+                  final momentsRaw =
+                      prefs.getString('locksync_moments');
+                  final moments = momentsRaw != null
+                      ? (jsonDecode(momentsRaw) as List)
+                      : [];
+                  moments.insert(
+                      0,
+                      Map<String, dynamic>.from(
+                          payload as Map<Object?, Object?>));
+                  await prefs.setString(
+                      'locksync_moments', jsonEncode(moments));
+                }
+
                 // Persist canvas JSON and render the wallpaper so the lock
                 // screen stays up to date even while the app is sleeping.
                 if (syncType == 'canvas') {
