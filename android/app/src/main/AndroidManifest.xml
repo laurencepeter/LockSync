@@ -37,13 +37,13 @@
 
     <application
         android:label="LockSync"
-        android:name=".MainApplication"
+        android:name="com.locksync.app.MainApplication"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">
 
         <!-- Main Flutter activity -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.locksync.app.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
