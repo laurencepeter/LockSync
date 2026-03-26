@@ -49,6 +49,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
   StreamSubscription? _canvasSyncSub;
   Timer? _sendThrottle;
   bool _isDrawing = false;
+  Map<String, dynamic>? _pendingPartnerUpdate;
 
   static const Map<String, int> _canvasThemes = {
     'default':  0xFF0F0F1A,
@@ -177,10 +178,17 @@ class _CanvasScreenState extends State<CanvasScreen> {
     super.dispose();
   }
 
-  /// When partner sends canvas data, update the local canvas if the user
-  /// is not in the middle of a stroke (to avoid jarring mid-draw resets).
+  /// When partner sends canvas data, update the local canvas. If the user
+  /// is mid-stroke, queue the update so it applies once the stroke finishes.
   void _onPartnerCanvasUpdate(Map<String, dynamic> data) {
-    if (_isDrawing) return;
+    if (_isDrawing) {
+      _pendingPartnerUpdate = data;
+      return;
+    }
+    _applyPartnerUpdate(data);
+  }
+
+  void _applyPartnerUpdate(Map<String, dynamic> data) {
     final incoming = CanvasState.fromJson(data);
     setState(() {
       _canvasState = incoming;
@@ -272,16 +280,24 @@ class _CanvasScreenState extends State<CanvasScreen> {
       _isDrawing = false;
       _sendThrottle?.cancel();
       _saveAndSync();
+      // Apply any queued partner update that arrived mid-stroke
+      if (_pendingPartnerUpdate != null) {
+        _pendingPartnerUpdate = null;
+        // Re-sync our state so partner gets our latest strokes
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _saveAndSync();
+        });
+      }
     } else if (_currentTool == CanvasTool.select) {
       _endDrag();
     }
   }
 
-  /// Send canvas data at most every 300ms during active drawing so the
+  /// Send canvas data at most every 150ms during active drawing so the
   /// partner sees strokes appearing in real-time.
   void _throttledSync() {
     if (_sendThrottle?.isActive ?? false) return;
-    _sendThrottle = Timer(const Duration(milliseconds: 300), () {
+    _sendThrottle = Timer(const Duration(milliseconds: 150), () {
       // Build a temporary state that includes the in-progress stroke
       final tempState = CanvasState.fromJson(_canvasState.toJson());
       if (_currentStrokePoints.isNotEmpty) {

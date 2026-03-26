@@ -113,14 +113,21 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
                 if (show) {
                     activity.window.addFlags(
                         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                     )
                 } else {
                     activity.window.clearFlags(
                         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                     )
                 }
+            }
+            // Also request dismiss keyguard on API 26+ for full interaction
+            if (show && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val keyguardManager = activity.getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                keyguardManager?.requestDismissKeyguard(activity, null)
             }
             result.success(true)
         } catch (e: Exception) {

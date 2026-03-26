@@ -12,6 +12,7 @@ import '../services/wallpaper_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'canvas_screen.dart';
+import 'moments_screen.dart';
 import 'settings_screen.dart';
 import 'welcome_screen.dart';
 import 'widgets_screen.dart';
@@ -30,7 +31,8 @@ class _SyncScreenState extends State<SyncScreen>
   late AnimationController _typingAnim;
   String _lastSentText = '';
 
-  // Page view for swiping between canvas and text
+  // Page view for swiping between screens
+  // Page 0: Chat/Messages (default), Page 1: Canvas, Page 2: Widgets, Page 3: Moments
   final _pageController = PageController(initialPage: 0);
   int _currentPage = 0;
 
@@ -441,7 +443,7 @@ class _SyncScreenState extends State<SyncScreen>
 
                     const Divider(color: Colors.white10, height: 1),
 
-                    // ── Swipeable pages: Canvas ↔ Text ──
+                    // ── Swipeable pages: Chat | Canvas | Widgets | Moments ──
                     Expanded(
                       child: PageView(
                         controller: _pageController,
@@ -449,10 +451,14 @@ class _SyncScreenState extends State<SyncScreen>
                           setState(() => _currentPage = page);
                         },
                         children: [
-                          // Page 0: Live canvas preview
-                          _buildCanvasPage(ws, partnerName),
-                          // Page 1: Text messages
+                          // Page 0: Chat / Messages (default landing)
                           _buildTextPage(ws, partnerName, partnerText),
+                          // Page 1: Live canvas preview (full screen)
+                          _buildCanvasPage(ws, partnerName),
+                          // Page 2: Widgets (grocery, watchlist, etc.)
+                          _buildWidgetsPage(ws),
+                          // Page 3: Moments (images / videos)
+                          _buildMomentsPage(ws),
                         ],
                       ),
                     ),
@@ -465,12 +471,22 @@ class _SyncScreenState extends State<SyncScreen>
                         children: [
                           _PageDot(
                             active: _currentPage == 0,
-                            label: 'Canvas',
+                            label: 'Chat',
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
                           _PageDot(
                             active: _currentPage == 1,
-                            label: 'Messages',
+                            label: 'Canvas',
+                          ),
+                          const SizedBox(width: 8),
+                          _PageDot(
+                            active: _currentPage == 2,
+                            label: 'Widgets',
+                          ),
+                          const SizedBox(width: 8),
+                          _PageDot(
+                            active: _currentPage == 3,
+                            label: 'Moments',
                           ),
                         ],
                       ),
@@ -505,27 +521,14 @@ class _SyncScreenState extends State<SyncScreen>
             children: [
               _BottomAction(
                 icon: Icons.brush_rounded,
-                label: 'Edit Canvas',
+                label: 'Canvas',
                 onTap: () async {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const CanvasScreen()),
                   );
-                  // Reload canvas preview when returning from editor
                   _loadCanvasPreview();
                   setState(() {});
-                },
-              ),
-              _BottomAction(
-                icon: Icons.widgets_rounded,
-                label: 'Widgets',
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    backgroundColor: Colors.transparent,
-                    isScrollControlled: true,
-                    builder: (_) => const WidgetDrawer(),
-                  );
                 },
               ),
               _BottomAction(
@@ -546,6 +549,16 @@ class _SyncScreenState extends State<SyncScreen>
                       behavior: SnackBarBehavior.floating,
                       duration: Duration(seconds: 1),
                     ),
+                  );
+                },
+              ),
+              _BottomAction(
+                icon: Icons.settings_rounded,
+                label: 'Settings',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   );
                 },
               ),
@@ -572,6 +585,14 @@ class _SyncScreenState extends State<SyncScreen>
         _previewCanvasState.backgroundImagePath != null;
 
     return GestureDetector(
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const CanvasScreen()),
+        );
+        _loadCanvasPreview();
+        setState(() {});
+      },
       onDoubleTapDown: (details) {
         _showReactionPicker(TapUpDetails(
           kind: PointerDeviceKind.touch,
@@ -581,16 +602,9 @@ class _SyncScreenState extends State<SyncScreen>
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 400),
-        margin: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          color: _previewThemeColor(),
-          border: Border.all(
-            color: LockSyncTheme.primaryColor.withValues(alpha: 0.2),
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
+        color: _previewThemeColor(),
         child: Stack(
+          fit: StackFit.expand,
           children: [
             // Background image
             if (_previewCanvasState.backgroundImagePath != null)
@@ -661,7 +675,7 @@ class _SyncScreenState extends State<SyncScreen>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Tap "Edit Canvas" to start drawing\nor swipe right for messages',
+                      'Tap to edit canvas\nSwipe for more screens',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.15),
@@ -672,16 +686,32 @@ class _SyncScreenState extends State<SyncScreen>
                 ),
               ),
 
-            // Swipe hint arrow (right edge)
+            // Edit hint overlay (bottom)
             Positioned(
-              right: 8,
-              top: 0,
-              bottom: 0,
+              bottom: 16,
+              left: 0,
+              right: 0,
               child: Center(
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  color: Colors.white.withValues(alpha: 0.15),
-                  size: 28,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.brush_rounded,
+                          color: Colors.white54, size: 14),
+                      SizedBox(width: 6),
+                      Text(
+                        'Tap to edit',
+                        style: TextStyle(
+                            color: Colors.white54, fontSize: 12),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -691,7 +721,270 @@ class _SyncScreenState extends State<SyncScreen>
     );
   }
 
-  // ── Page 1: Text messages ────────────────────────────────────────
+  // ── Page 2: Widgets ──────────────────────────────────────────────
+  Widget _buildWidgetsPage(WebSocketService ws) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.widgets_rounded,
+                size: 16,
+                color: LockSyncTheme.primaryColor.withValues(alpha: 0.7),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Shared Widgets',
+                style: TextStyle(
+                  color: LockSyncTheme.primaryColor.withValues(alpha: 0.7),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _WidgetPageCard(
+            icon: Icons.shopping_cart_rounded,
+            title: 'Grocery Checklist',
+            subtitle: 'Shared shopping list',
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.transparent,
+                isScrollControlled: true,
+                builder: (_) => const WidgetDrawer(),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          _WidgetPageCard(
+            icon: Icons.movie_rounded,
+            title: 'Watchlist',
+            subtitle: 'Movies & shows to watch together',
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.transparent,
+                isScrollControlled: true,
+                builder: (_) => const WidgetDrawer(),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          _WidgetPageCard(
+            icon: Icons.alarm_rounded,
+            title: 'Reminders',
+            subtitle: 'Shared reminders for each other',
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.transparent,
+                isScrollControlled: true,
+                builder: (_) => const WidgetDrawer(),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          _WidgetPageCard(
+            icon: Icons.timer_rounded,
+            title: 'Countdowns',
+            subtitle: 'Count down to special dates',
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.transparent,
+                isScrollControlled: true,
+                builder: (_) => const WidgetDrawer(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Page 3: Moments ─────────────────────────────────────────────
+  Widget _buildMomentsPage(WebSocketService ws) {
+    final moments = ws.storage.getMoments();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Row(
+            children: [
+              Icon(
+                Icons.photo_camera_rounded,
+                size: 16,
+                color: LockSyncTheme.primaryColor.withValues(alpha: 0.7),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Moments',
+                style: TextStyle(
+                  color: LockSyncTheme.primaryColor.withValues(alpha: 0.7),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const MomentsScreen()),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: LockSyncTheme.primaryColor
+                        .withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add_a_photo_rounded,
+                          color: LockSyncTheme.primaryColor, size: 14),
+                      SizedBox(width: 6),
+                      Text(
+                        'Send',
+                        style: TextStyle(
+                          color: LockSyncTheme.primaryColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: moments.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.photo_camera_rounded,
+                          size: 48,
+                          color: Colors.white.withValues(alpha: 0.1)),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No moments yet',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap "Send" to share a photo or video',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: moments.length,
+                  itemBuilder: (ctx, i) {
+                    final m = Moment.fromJson(moments[i]);
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const MomentsScreen()),
+                        );
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: Colors.white.withValues(alpha: 0.05),
+                          border: Border.all(
+                            color: m.isExpired
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : LockSyncTheme.primaryColor
+                                    .withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              m.isVideo
+                                  ? Icons.videocam_rounded
+                                  : Icons.image_rounded,
+                              color: m.isExpired
+                                  ? Colors.white24
+                                  : Colors.white60,
+                              size: 24,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'From ${m.sentBy}',
+                                    style: TextStyle(
+                                      color: m.isExpired
+                                          ? Colors.white30
+                                          : Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    m.isExpired
+                                        ? 'Expired'
+                                        : '${m.viewCount}/${m.maxReplays} views',
+                                    style: TextStyle(
+                                      color: m.isExpired
+                                          ? Colors.red.withValues(
+                                              alpha: 0.6)
+                                          : Colors.white38,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: Colors.white.withValues(alpha: 0.2),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ── Page 0: Text messages (Chat) ────────────────────────────────
   Widget _buildTextPage(
       WebSocketService ws, String partnerName, String partnerText) {
     return Column(
@@ -892,6 +1185,79 @@ class _PageDot extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+// ─── Widget page card ─────────────────────────────────────────────────
+class _WidgetPageCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _WidgetPageCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.white.withValues(alpha: 0.05),
+          border: Border.all(
+            color: LockSyncTheme.primaryColor.withValues(alpha: 0.15),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: LockSyncTheme.primaryColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: LockSyncTheme.primaryColor, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.white.withValues(alpha: 0.2),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
