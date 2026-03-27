@@ -477,10 +477,21 @@ void _backgroundMain(ServiceInstance service) async {
                       );
                       // Render the canvas to PNG and set it as the lock
                       // screen wallpaper immediately from the background engine.
-                      // WallpaperPlugin is registered with this engine via
-                      // MainApplication so the MethodChannel call succeeds
-                      // even while the phone is locked — no app open needed.
+                      // WallpaperPlugin is registered in the background engine
+                      // via LockSyncBackgroundService.configureFlutterEngine()
+                      // so the MethodChannel call succeeds even while the
+                      // phone is locked — no app open needed.
                       try {
+                        // Init device dimensions on first render so the
+                        // canvas fills the entire lock screen.
+                        if (CanvasRenderer.deviceWidth == null) {
+                          final dims =
+                              await WallpaperService.getScreenDimensions();
+                          if (dims != null) {
+                            CanvasRenderer.setDeviceDimensions(
+                                dims['width']!, dims['height']!);
+                          }
+                        }
                         final bytes = await CanvasRenderer.renderToBytes(
                           Map<String, dynamic>.from(
                               canvasData as Map<Object?, Object?>),
@@ -498,8 +509,9 @@ void _backgroundMain(ServiceInstance service) async {
                           await prefs.setBool(
                               'bg_wallpaper_pending', true);
                         }
-                      } catch (_) {
-                        // Best-effort — don't crash the background service
+                      } catch (e) {
+                        // Log but don't crash the background service
+                        debugPrint('[BG] Wallpaper render failed: $e');
                       }
                     }
                   }

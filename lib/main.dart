@@ -30,6 +30,10 @@ void main() async {
   // at all times — users shouldn't need to open the app first.
   WallpaperService.setShowOnLockScreen(true);
 
+  // Query the device's actual screen dimensions so canvas renders match
+  // the lock screen exactly instead of using hardcoded 1080x1920.
+  _initDeviceDimensions();
+
   // Auto-enable wallpaper updates if not yet prompted (default on)
   if (!storage.autoWallpaperPrompted) {
     await storage.setAutoWallpaperPrompted(true);
@@ -47,6 +51,19 @@ void main() async {
   }
 
   runApp(LockSyncApp(storage: storage));
+}
+
+/// Query device screen dimensions and cache them in CanvasRenderer so
+/// wallpaper renders match the actual lock screen resolution.
+Future<void> _initDeviceDimensions() async {
+  try {
+    final dims = await WallpaperService.getScreenDimensions();
+    if (dims != null) {
+      CanvasRenderer.setDeviceDimensions(dims['width']!, dims['height']!);
+    }
+  } catch (e) {
+    debugPrint('[LockSync] Failed to get screen dimensions: $e');
+  }
 }
 
 /// Render the last-known canvas state and set it as the lock screen wallpaper.

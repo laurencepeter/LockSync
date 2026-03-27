@@ -152,6 +152,22 @@ class WallpaperService {
     }
   }
 
+  /// Get the device's actual screen dimensions (in physical pixels).
+  /// Returns a map with 'width' and 'height', or null on failure.
+  static Future<Map<String, int>?> getScreenDimensions() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final result = await _channel.invokeMethod('getScreenDimensions');
+      if (result is Map) {
+        return {
+          'width': (result['width'] as int?) ?? 1080,
+          'height': (result['height'] as int?) ?? 1920,
+        };
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Allow the activity to display over the Android lock screen.
   /// Call with [show] = true so the canvas (or a full-screen notification)
   /// can appear without the user needing to unlock first.
