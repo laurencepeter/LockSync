@@ -30,6 +30,7 @@ class _SyncScreenState extends State<SyncScreen>
   late AnimationController _enterAnim;
   late AnimationController _typingAnim;
   String _lastSentText = '';
+  Timer? _textSendThrottle;
 
   // Page view for swiping between screens
   // Page 0: Chat/Messages (default), Page 1: Canvas, Page 2: Widgets, Page 3: Moments
@@ -132,6 +133,7 @@ class _SyncScreenState extends State<SyncScreen>
 
   @override
   void dispose() {
+    _textSendThrottle?.cancel();
     _textController.dispose();
     _enterAnim.dispose();
     _typingAnim.dispose();
@@ -146,8 +148,15 @@ class _SyncScreenState extends State<SyncScreen>
     final text = _textController.text;
     if (text != _lastSentText) {
       _lastSentText = text;
-      final ws = context.read<WebSocketService>();
-      ws.sendText(text);
+      // Throttle text sync to at most once per 150ms to prevent flooding
+      // the server on fast typing
+      _textSendThrottle?.cancel();
+      _textSendThrottle = Timer(const Duration(milliseconds: 150), () {
+        _textSendThrottle = null;
+        if (!mounted) return;
+        final ws = context.read<WebSocketService>();
+        ws.sendText(_lastSentText);
+      });
     }
   }
 

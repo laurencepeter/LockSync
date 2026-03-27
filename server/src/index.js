@@ -398,9 +398,30 @@ function handleSync(ws, msg) {
   }
 
   const payload = msg.payload;
-  if (!payload) return;
+  if (!payload || typeof payload !== 'object') return;
 
   const syncType = payload.syncType;
+  if (!syncType || typeof syncType !== 'string') return;
+
+  // Validate syncType is a known type to prevent arbitrary data injection
+  const validSyncTypes = ['text', 'canvas', 'display_name', 'mood', 'nudge',
+    'reaction', 'grocery', 'watchlist', 'reminder', 'countdown', 'moment'];
+  if (!validSyncTypes.includes(syncType)) {
+    sendError(ws, 'INVALID_SYNC_TYPE', `Unknown sync type: ${syncType}`);
+    return;
+  }
+
+  // Input sanitization — BEFORE buffering so sanitized values are stored
+  if (payload.text && typeof payload.text === 'string') {
+    payload.text = sanitizeText(payload.text);
+  }
+  if (payload.displayName && typeof payload.displayName === 'string') {
+    payload.displayName = sanitizeText(payload.displayName).substring(0, 50);
+  }
+  if (payload.mood && typeof payload.mood === 'string') {
+    // Moods should only be emoji — cap length to prevent abuse
+    payload.mood = payload.mood.substring(0, 8);
+  }
 
   // Nudge rate limiting (server-side enforcement)
   if (syncType === 'nudge') {
@@ -413,7 +434,7 @@ function handleSync(ws, msg) {
     nudgeLimits.set(ws._deviceId, now);
   }
 
-  // Buffer state for reconnection sync
+  // Buffer state for reconnection sync (uses already-sanitized values)
   if (syncType === 'text' || syncType === 'display_name' || syncType === 'mood' || syncType === 'canvas') {
     if (!lastStateBuffer.has(ws._pairId)) {
       lastStateBuffer.set(ws._pairId, {});
@@ -435,14 +456,6 @@ function handleSync(ws, msg) {
     } else if (syncType === 'canvas') {
       buffer[ws._deviceId].canvas = payload.canvasData;
     }
-  }
-
-  // Input sanitization: strip HTML tags from text fields
-  if (payload.text && typeof payload.text === 'string') {
-    payload.text = sanitizeText(payload.text);
-  }
-  if (payload.displayName && typeof payload.displayName === 'string') {
-    payload.displayName = sanitizeText(payload.displayName);
   }
 
   const partnerWs = getPartnerWs(pair, ws._deviceId);
@@ -471,6 +484,13 @@ function handleDisconnect(ws) {
 
   const pair = activePairs.get(pairId);
   if (!pair) return;
+
+  // Clear the ws reference so we don't hold stale socket objects in memory
+  if (pair.deviceA.id === ws._deviceId && pair.deviceA.ws === ws) {
+    pair.deviceA.ws = null;
+  } else if (pair.deviceB.id === ws._deviceId && pair.deviceB.ws === ws) {
+    pair.deviceB.ws = null;
+  }
 
   const partnerWs = getPartnerWs(pair, ws._deviceId);
   if (partnerWs?.readyState === 1) {
@@ -533,9 +553,15 @@ function checkRateLimit(ip) {
   return true;
 }
 
-/** Strip HTML/script tags from user-submitted text */
+/** Strip HTML/script tags and dangerous characters from user-submitted text */
 function sanitizeText(text) {
-  return text.replace(/<[^>]*>/g, '').substring(0, 1000);
+  return text
+    .replace(/<[^>]*>/g, '')           // Strip HTML tags
+    .replace(/javascript:/gi, '')       // Strip JS protocol
+    .replace(/on\w+\s*=/gi, '')         // Strip event handlers
+    .replace(/data:\s*text\/html/gi, '') // Strip data: HTML URIs
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '') // Strip control chars
+    .substring(0, 1000);
 }
 
 // ─── Periodic cleanup ────────────────────────────────────────────────
@@ -558,6 +584,13 @@ setInterval(() => {
   for (const [deviceId, ts] of nudgeLimits) {
     if (now - ts > 60000) {
       nudgeLimits.delete(deviceId);
+    }
+  }
+
+  // Clean up lastStateBuffer entries for pairs that no longer exist
+  for (const [pairId] of lastStateBuffer) {
+    if (!activePairs.has(pairId)) {
+      lastStateBuffer.delete(pairId);
     }
   }
 }, 60000);

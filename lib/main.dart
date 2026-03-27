@@ -61,8 +61,8 @@ Future<void> _setInitialWallpaper(StorageService storage) async {
     if (bytes != null) {
       await WallpaperService.setWallpaperSilent(bytes);
     }
-  } catch (_) {
-    // Best-effort — don't block app startup
+  } catch (e) {
+    debugPrint('[LockSync] Initial wallpaper failed: $e');
   }
 }
 
