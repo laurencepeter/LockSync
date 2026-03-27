@@ -115,6 +115,46 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   void _onMomentViewed(Moment moment) {
     setState(() => moment.viewCount++);
+    // Auto-remove moments once all views are used up — no history retained
+    if (moment.isExpired) {
+      setState(() => _moments.removeWhere((m) => m.id == moment.id));
+    }
+    _persistMoments();
+  }
+
+  void _clearAllMoments() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Clear All Moments?',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'This will permanently delete all moments. This cannot be undone.',
+          style: TextStyle(color: Colors.white60),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() => _moments.clear());
+              _persistMoments();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _clearExpiredMoments() {
+    setState(() => _moments.removeWhere((m) => m.isExpired));
     _persistMoments();
   }
 
@@ -166,7 +206,34 @@ class _MomentsScreenState extends State<MomentsScreen> {
                       ),
                     ),
                     const Spacer(),
-                    const SizedBox(width: 48),
+                    if (_moments.isNotEmpty)
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert_rounded,
+                            color: Colors.white70),
+                        color: const Color(0xFF1A1A2E),
+                        onSelected: (value) {
+                          if (value == 'clear_expired') {
+                            _clearExpiredMoments();
+                          } else if (value == 'clear_all') {
+                            _clearAllMoments();
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          if (_moments.any((m) => m.isExpired))
+                            const PopupMenuItem(
+                              value: 'clear_expired',
+                              child: Text('Clear Viewed',
+                                  style: TextStyle(color: Colors.white70)),
+                            ),
+                          const PopupMenuItem(
+                            value: 'clear_all',
+                            child: Text('Clear All',
+                                style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      )
+                    else
+                      const SizedBox(width: 48),
                   ],
                 ),
               ),

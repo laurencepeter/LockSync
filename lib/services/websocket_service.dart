@@ -165,6 +165,8 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
 
   void _handleAppResumed() {
     _isInForeground = true;
+    // Ensure the app continues to display over the lock screen
+    WallpaperService.setShowOnLockScreen(true);
     // Pause the background service's WebSocket first so the server only sees
     // one active connection per device. Without this, the server closes the
     // main isolate's connection when both try to authenticate simultaneously,
