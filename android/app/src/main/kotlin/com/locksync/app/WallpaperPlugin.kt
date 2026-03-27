@@ -1,8 +1,13 @@
 package com.locksync.app
 
 import android.app.WallpaperManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.os.Build
+import android.util.DisplayMetrics
 import android.view.WindowManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -19,6 +24,7 @@ import java.io.File
  *
  * setLockScreenWallpaper  — uses applicationContext; works from background service.
  * setShowOnLockScreen     — requires an Activity; silently ignored from background.
+ * getScreenDimensions     — returns device screen width/height for canvas rendering.
  */
 class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
 
@@ -61,10 +67,15 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
         when (call.method) {
             "setLockScreenWallpaper" -> handleSetWallpaper(call, result)
             "setShowOnLockScreen"   -> handleShowOnLockScreen(call, result)
+            "getScreenDimensions"   -> handleGetScreenDimensions(result)
             else                    -> result.notImplemented()
         }
     }
 
+    /**
+     * Scale the source bitmap to fill [targetW] x [targetH], cropping to
+     * maintain aspect ratio (center-crop), then set as lock screen wallpaper.
+     */
     private fun handleSetWallpaper(call: MethodCall, result: MethodChannel.Result) {
         val path = call.argument<String>("path")
         if (path == null) {
@@ -77,12 +88,36 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
         }
         try {
             val file = File(path)
-            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-            if (bitmap == null) {
+            val srcBitmap = BitmapFactory.decodeFile(file.absolutePath)
+            if (srcBitmap == null) {
                 result.error("DECODE_ERROR", "Failed to decode image at $path", null)
                 return
             }
+
             val wm = WallpaperManager.getInstance(ctx)
+
+            // Get the actual device lock screen dimensions
+            val targetW: Int
+            val targetH: Int
+            val desiredW = wm.desiredMinimumWidth
+            val desiredH = wm.desiredMinimumHeight
+            if (desiredW > 0 && desiredH > 0) {
+                targetW = desiredW
+                targetH = desiredH
+            } else {
+                // Fallback: use actual screen metrics
+                val windowManager = ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as WindowManager
+                val metrics = DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.getRealMetrics(metrics)
+                targetW = metrics.widthPixels
+                targetH = metrics.heightPixels
+            }
+
+            // Scale-to-fill (center crop) the rendered canvas to the device screen
+            val bitmap = scaleCenterCrop(srcBitmap, targetW, targetH)
+            srcBitmap.recycle()
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 wm.setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
             } else {
@@ -94,6 +129,52 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
         } catch (e: Exception) {
             result.error("WALLPAPER_ERROR", e.message, null)
         }
+    }
+
+    /**
+     * Scale [src] to fill [targetW] x [targetH] exactly, center-cropping
+     * if the aspect ratios differ, so the wallpaper always covers the
+     * entire lock screen without black bars or corner-only rendering.
+     */
+    private fun scaleCenterCrop(src: Bitmap, targetW: Int, targetH: Int): Bitmap {
+        if (src.width == targetW && src.height == targetH) return src
+
+        val scaleX = targetW.toFloat() / src.width
+        val scaleY = targetH.toFloat() / src.height
+        val scale = maxOf(scaleX, scaleY) // fill — use max to cover fully
+
+        val scaledW = (src.width * scale).toInt()
+        val scaledH = (src.height * scale).toInt()
+
+        val output = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Center the scaled image so any crop is symmetrical
+        val offsetX = (targetW - scaledW) / 2f
+        val offsetY = (targetH - scaledH) / 2f
+
+        val matrix = Matrix()
+        matrix.setScale(scale, scale)
+        matrix.postTranslate(offsetX, offsetY)
+
+        canvas.drawBitmap(src, matrix, paint)
+        return output
+    }
+
+    private fun handleGetScreenDimensions(result: MethodChannel.Result) {
+        val ctx = appContext ?: run {
+            result.error("NO_CONTEXT", "Application context unavailable", null)
+            return
+        }
+        val windowManager = ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as WindowManager
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+        result.success(mapOf(
+            "width" to metrics.widthPixels,
+            "height" to metrics.heightPixels
+        ))
     }
 
     private fun handleShowOnLockScreen(call: MethodCall, result: MethodChannel.Result) {

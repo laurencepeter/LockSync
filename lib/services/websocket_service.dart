@@ -155,7 +155,6 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _isInForeground = true;
       _handleAppResumed();
     } else if (state == AppLifecycleState.paused ||
                state == AppLifecycleState.detached) {
@@ -165,6 +164,9 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _handleAppResumed() {
+    _isInForeground = true;
+    // Ensure the app continues to display over the lock screen
+    WallpaperService.setShowOnLockScreen(true);
     // Pause the background service's WebSocket first so the server only sees
     // one active connection per device. Without this, the server closes the
     // main isolate's connection when both try to authenticate simultaneously,
@@ -178,11 +180,18 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     // the user glances at their phone.
     _applyPendingWallpaper();
 
+    // Delay the main connect slightly to give the background service time to
+    // actually close its WebSocket. This prevents the dual-connection race
+    // where both try to authenticate at the same time and the server drops one.
     if (_status == ConnectionStatus.disconnected ||
         (_channel == null && storage.isPaired)) {
       _isReconnecting = true;
       notifyListeners();
-      connect();
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(const Duration(milliseconds: 500), () {
+        _reconnectTimer = null;
+        connect();
+      });
       // _isReconnecting is cleared in the 'authenticated' message handler
       // once the server confirms the session is restored.
     }
@@ -203,8 +212,8 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         await WallpaperService.setWallpaperSilent(bytes);
       }
       await prefs.setBool('bg_wallpaper_pending', false);
-    } catch (_) {
-      // Best-effort — don't block resume
+    } catch (e) {
+      debugPrint('[WS] Failed to apply pending wallpaper: $e');
     }
   }
 
@@ -228,7 +237,14 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+      final channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+      await channel.ready;
+      // Verify we weren't disposed or disconnected while awaiting
+      if (_status != ConnectionStatus.connecting) {
+        channel.sink.close();
+        return;
+      }
+      _channel = channel;
       _channel!.stream.listen(
         _onMessage,
         onError: (error) {
@@ -240,7 +256,6 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
           _handleDisconnect();
         },
       );
-      await _channel!.ready;
       _status = ConnectionStatus.connected;
       _reconnectAttempts = 0;
       _startPing();
@@ -251,6 +266,8 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       }
     } catch (e) {
       debugPrint('[WS] Connect failed: $e');
+      // Reset to a state that _handleDisconnect can process
+      _status = ConnectionStatus.connecting;
       _handleDisconnect();
     }
   }
@@ -454,15 +471,25 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   /// Skipped while the app is in the background because the background-service
   /// isolate already handles wallpaper updates from its own WebSocket — this
   /// avoids duplicate renders and saves CPU/data.
+  bool _wallpaperUpdateInProgress = false;
+
   void scheduleWallpaperUpdate(Map<String, dynamic> canvasData) {
     if (!_isInForeground) return;
     _wallpaperDebounce?.cancel();
     _wallpaperDebounce =
         Timer(const Duration(milliseconds: 800), () async {
-      if (!_isInForeground) return; // Re-check in case state changed
-      final bytes = await CanvasRenderer.renderToBytes(canvasData);
-      if (bytes != null) {
-        await WallpaperService.setWallpaperSilent(bytes);
+      _wallpaperDebounce = null;
+      if (!_isInForeground || _wallpaperUpdateInProgress) return;
+      _wallpaperUpdateInProgress = true;
+      try {
+        final bytes = await CanvasRenderer.renderToBytes(canvasData);
+        if (bytes != null && _isInForeground) {
+          await WallpaperService.setWallpaperSilent(bytes);
+        }
+      } catch (e) {
+        debugPrint('[WS] Wallpaper update failed: $e');
+      } finally {
+        _wallpaperUpdateInProgress = false;
       }
     });
   }
@@ -629,8 +656,14 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _send(Map<String, dynamic> data) {
-    if (_channel != null) {
-      _channel!.sink.add(jsonEncode(data));
+    if (_channel != null &&
+        (_status == ConnectionStatus.connected ||
+         _status == ConnectionStatus.paired)) {
+      try {
+        _channel!.sink.add(jsonEncode(data));
+      } catch (e) {
+        debugPrint('[WS] Send failed: $e');
+      }
     }
   }
 
@@ -644,6 +677,8 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   void _handleDisconnect() {
     _pingTimer?.cancel();
     _channel = null;
+    // Prevent re-entrant disconnect handling
+    if (_status == ConnectionStatus.disconnected) return;
     _status = ConnectionStatus.disconnected;
     _partnerOnline = false;
     // Show reconnecting banner in SyncScreen while we attempt to restore
@@ -656,6 +691,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     if (_reconnectAttempts < 5) _reconnectAttempts++;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(delay, () {
+      _reconnectTimer = null;
       if (_status == ConnectionStatus.disconnected) {
         connect();
       }
@@ -674,14 +710,26 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Cancel timers and subscriptions first to prevent callbacks firing
+    // after stream controllers are closed
+    _wallpaperDebounce?.cancel();
+    _wallpaperDebounce = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _bgServiceSub?.cancel();
+    _bgServiceSub = null;
+    // Close stream controllers
     _reactionController.close();
     _nudgeController.close();
     _widgetSyncController.close();
     _wallpaperPromptController.close();
     _canvasSyncController.close();
-    _wallpaperDebounce?.cancel();
-    _bgServiceSub?.cancel();
-    disconnect();
+    // Disconnect WebSocket last
+    _channel?.sink.close();
+    _channel = null;
+    _status = ConnectionStatus.disconnected;
     super.dispose();
   }
 }

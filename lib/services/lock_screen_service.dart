@@ -215,7 +215,9 @@ void _backgroundMain(ServiceInstance service) async {
   WebSocketChannel? channel;
   StreamSubscription? wsSub;
   Timer? pingTimer;
+  Timer? reconnectTimer;
   bool active = false;
+  int reconnectAttempts = 0;
 
   // ── Helper: show / update the lock screen message notification ──
   Future<void> showMessageNotif(String text) async {
@@ -330,6 +332,9 @@ void _backgroundMain(ServiceInstance service) async {
         'type': 'authenticate',
         'token': accessToken,
       }));
+
+      // Reset backoff on successful connection
+      reconnectAttempts = 0;
 
       wsSub = channel!.stream.listen(
         (raw) async {
@@ -472,10 +477,21 @@ void _backgroundMain(ServiceInstance service) async {
                       );
                       // Render the canvas to PNG and set it as the lock
                       // screen wallpaper immediately from the background engine.
-                      // WallpaperPlugin is registered with this engine via
-                      // MainApplication so the MethodChannel call succeeds
-                      // even while the phone is locked — no app open needed.
+                      // WallpaperPlugin is registered in the background engine
+                      // via LockSyncBackgroundService.configureFlutterEngine()
+                      // so the MethodChannel call succeeds even while the
+                      // phone is locked — no app open needed.
                       try {
+                        // Init device dimensions on first render so the
+                        // canvas fills the entire lock screen.
+                        if (CanvasRenderer.deviceWidth == null) {
+                          final dims =
+                              await WallpaperService.getScreenDimensions();
+                          if (dims != null) {
+                            CanvasRenderer.setDeviceDimensions(
+                                dims['width']!, dims['height']!);
+                          }
+                        }
                         final bytes = await CanvasRenderer.renderToBytes(
                           Map<String, dynamic>.from(
                               canvasData as Map<Object?, Object?>),
@@ -493,8 +509,9 @@ void _backgroundMain(ServiceInstance service) async {
                           await prefs.setBool(
                               'bg_wallpaper_pending', true);
                         }
-                      } catch (_) {
-                        // Best-effort — don't crash the background service
+                      } catch (e) {
+                        // Log but don't crash the background service
+                        debugPrint('[BG] Wallpaper render failed: $e');
                       }
                     }
                   }
@@ -506,17 +523,11 @@ void _backgroundMain(ServiceInstance service) async {
               break;
           }
         },
-        onDone: () async {
-          if (active) {
-            await Future.delayed(const Duration(seconds: 5));
-            connect();
-          }
+        onDone: () {
+          if (active) _scheduleReconnect();
         },
-        onError: (_) async {
-          if (active) {
-            await Future.delayed(const Duration(seconds: 5));
-            connect();
-          }
+        onError: (_) {
+          if (active) _scheduleReconnect();
         },
       );
 
@@ -525,19 +536,30 @@ void _backgroundMain(ServiceInstance service) async {
         channel?.sink.add(jsonEncode({'type': 'ping'}));
       });
     } catch (_) {
-      if (active) {
-        await Future.delayed(const Duration(seconds: 10));
-        connect();
-      }
+      if (active) _scheduleReconnect();
     }
+  }
+
+  /// Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap)
+  void _scheduleReconnect() {
+    reconnectTimer?.cancel();
+    final delaySec = (1 << reconnectAttempts).clamp(1, 30);
+    if (reconnectAttempts < 5) reconnectAttempts++;
+    reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      reconnectTimer = null;
+      if (active) connect();
+    });
   }
 
   // ── Handle stop signal from main isolate ──
   service.on(_kInvokeStop).listen((_) async {
     active = false;
+    reconnectTimer?.cancel();
+    reconnectTimer = null;
     pingTimer?.cancel();
     await wsSub?.cancel();
     await channel?.sink.close();
+    channel = null;
     await notifs.cancel(_kNotifIdMessage);
     service.stopSelf();
   });
@@ -545,8 +567,12 @@ void _backgroundMain(ServiceInstance service) async {
   // ── Handle start / re-credential signal ──
   service.on(_kInvokeStart).listen((_) async {
     active = true;
+    reconnectTimer?.cancel();
+    reconnectTimer = null;
+    reconnectAttempts = 0;
     await wsSub?.cancel();
     await channel?.sink.close();
+    channel = null;
     connect();
   });
 
@@ -554,6 +580,8 @@ void _backgroundMain(ServiceInstance service) async {
   // Prevents dual-connection conflicts that cause the main isolate to
   // get kicked off the server when the user is editing the canvas.
   service.on(_kInvokePause).listen((_) async {
+    reconnectTimer?.cancel();
+    reconnectTimer = null;
     pingTimer?.cancel();
     await wsSub?.cancel();
     await channel?.sink.close();
@@ -563,6 +591,7 @@ void _backgroundMain(ServiceInstance service) async {
   // ── Resume WS when the app goes back to the background ──
   service.on(_kInvokeResume).listen((_) async {
     if (active) {
+      reconnectAttempts = 0;
       connect();
     }
   });

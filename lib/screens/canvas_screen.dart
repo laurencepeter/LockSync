@@ -282,10 +282,14 @@ class _CanvasScreenState extends State<CanvasScreen> {
       _saveAndSync();
       // Apply any queued partner update that arrived mid-stroke
       if (_pendingPartnerUpdate != null) {
+        final pending = _pendingPartnerUpdate!;
         _pendingPartnerUpdate = null;
-        // Re-sync our state so partner gets our latest strokes
+        // Apply partner's update then re-sync so both sides converge
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _saveAndSync();
+          if (mounted) {
+            _applyPartnerUpdate(pending);
+            _saveAndSync();
+          }
         });
       }
     } else if (_currentTool == CanvasTool.select) {

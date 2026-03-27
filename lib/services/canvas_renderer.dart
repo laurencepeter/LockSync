@@ -18,16 +18,35 @@ class CanvasRenderer {
   static const int _defaultWidth = 1080;
   static const int _defaultHeight = 1920;
 
+  /// Cached device screen dimensions — populated on first call via
+  /// [setDeviceDimensions] so wallpaper renders match the actual screen.
+  static int? _deviceWidth;
+  static int? _deviceHeight;
+
+  /// Whether device dimensions have been initialized.
+  static int? get deviceWidth => _deviceWidth;
+  static int? get deviceHeight => _deviceHeight;
+
+  /// Set the actual device screen dimensions (in physical pixels).
+  /// Call once at startup after querying WallpaperService.getScreenDimensions().
+  static void setDeviceDimensions(int width, int height) {
+    _deviceWidth = width;
+    _deviceHeight = height;
+  }
+
   /// Renders [canvasJson] to PNG bytes at the given [width] × [height].
+  /// If device dimensions have been set, they override the defaults.
   /// Returns null on any error.
   static Future<Uint8List?> renderToBytes(
     Map<String, dynamic> canvasJson, {
-    int width = _defaultWidth,
-    int height = _defaultHeight,
+    int? width,
+    int? height,
   }) async {
     try {
       final state = CanvasState.fromJson(canvasJson);
-      return await _render(state, width, height);
+      final w = width ?? _deviceWidth ?? _defaultWidth;
+      final h = height ?? _deviceHeight ?? _defaultHeight;
+      return await _render(state, w, h);
     } catch (_) {
       return null;
     }
