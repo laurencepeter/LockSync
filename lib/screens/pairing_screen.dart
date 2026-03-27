@@ -61,7 +61,15 @@ class _PairingScreenState extends State<PairingScreen>
       }
       setState(() {
         _secondsLeft--;
-        if (_secondsLeft <= 0) t.cancel();
+        if (_secondsLeft <= 0) {
+          t.cancel();
+          // Auto-regenerate so the user never has to manually refresh the code
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && !_navigated) {
+              _generateCode(context.read<WebSocketService>());
+            }
+          });
+        }
       });
     });
   }
@@ -128,6 +136,18 @@ class _PairingScreenState extends State<PairingScreen>
     if (ws.status == ConnectionStatus.paired && !_navigated) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _navigateToDisplayName());
+    }
+
+    // Auto-regenerate when the server signals the code expired (e.g. after a
+    // reconnect where the client and server clocks are slightly out of sync)
+    if (ws.errorMessage == 'Pairing code expired. Generate a new one.' &&
+        !_navigated) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_navigated) {
+          ws.clearError();
+          _generateCode(ws);
+        }
+      });
     }
 
     return Scaffold(

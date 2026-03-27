@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/websocket_service.dart';
+import '../theme.dart';
 
 class AnimatedGradientBg extends StatefulWidget {
   final Widget child;
@@ -30,6 +33,17 @@ class _AnimatedGradientBgState extends State<AnimatedGradientBg>
 
   @override
   Widget build(BuildContext context) {
+    String themeId = 'default';
+    try {
+      themeId = context
+          .read<WebSocketService>()
+          .storage
+          .activeTheme;
+    } catch (_) {
+      // Provider not available; fall back to default theme
+    }
+    final colors = LockSyncTheme.gradientColors(themeId);
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -41,11 +55,7 @@ class _AnimatedGradientBgState extends State<AnimatedGradientBg>
                 0.5 + _controller.value * 0.5,
                 1.0 - _controller.value * 0.3,
               ),
-              colors: const [
-                Color(0xFF0F0F1A),
-                Color(0xFF1A1A3E),
-                Color(0xFF0F0F1A),
-              ],
+              colors: colors,
               stops: [
                 0.0,
                 0.3 + _controller.value * 0.4,

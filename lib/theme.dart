@@ -13,6 +13,23 @@ class LockSyncTheme {
   static const accentColor = _accentColor;
   static const secondaryColor = _secondaryColor;
 
+  /// Returns the three gradient stop colors for the animated background
+  /// corresponding to the given theme ID.
+  static List<Color> gradientColors(String themeId) {
+    switch (themeId) {
+      case 'neon_night':
+        return const [Color(0xFF0D0010), Color(0xFF1A0028), Color(0xFF0D0010)];
+      case 'soft_pastel':
+        return const [Color(0xFF180F22), Color(0xFF221832), Color(0xFF180F22)];
+      case 'minimal_bw':
+        return const [Color(0xFF080808), Color(0xFF181818), Color(0xFF080808)];
+      case 'retro_arcade':
+        return const [Color(0xFF001408), Color(0xFF002016), Color(0xFF001408)];
+      default: // 'default'
+        return const [Color(0xFF0F0F1A), Color(0xFF1A1A3E), Color(0xFF0F0F1A)];
+    }
+  }
+
   static ThemeData get darkTheme {
     return ThemeData(
       useMaterial3: true,
