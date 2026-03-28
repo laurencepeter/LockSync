@@ -314,6 +314,18 @@ void _backgroundMain(ServiceInstance service) async {
     }
   }
 
+  // ── Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap) ──
+  late void Function() scheduleReconnect;
+  scheduleReconnect = () {
+    reconnectTimer?.cancel();
+    final delaySec = (1 << reconnectAttempts).clamp(1, 30);
+    if (reconnectAttempts < 5) reconnectAttempts++;
+    reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      reconnectTimer = null;
+      if (active) connect();
+    });
+  };
+
   // ── Connect WebSocket and start relaying ──
   Future<void> connect() async {
     final prefs = await SharedPreferences.getInstance();
@@ -538,19 +550,6 @@ void _backgroundMain(ServiceInstance service) async {
       if (active) scheduleReconnect();
     }
   }
-
-  late void Function() scheduleReconnect;
-
-  /// Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap)
-  scheduleReconnect = () {
-    reconnectTimer?.cancel();
-    final delaySec = (1 << reconnectAttempts).clamp(1, 30);
-    if (reconnectAttempts < 5) reconnectAttempts++;
-    reconnectTimer = Timer(Duration(seconds: delaySec), () {
-      reconnectTimer = null;
-      if (active) connect();
-    });
-  };
 
   // ── Handle stop signal from main isolate ──
   service.on(_kInvokeStop).listen((_) async {
