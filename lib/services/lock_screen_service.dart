@@ -540,8 +540,7 @@ void _backgroundMain(ServiceInstance service) async {
   }
 
   // ── Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap) ──
-  late void Function() scheduleReconnect;
-  scheduleReconnect = () {
+  void scheduleReconnect() {
     reconnectTimer?.cancel();
     final delaySec = (1 << reconnectAttempts).clamp(1, 30);
     if (reconnectAttempts < 5) reconnectAttempts++;
@@ -549,7 +548,7 @@ void _backgroundMain(ServiceInstance service) async {
       reconnectTimer = null;
       if (active) connect();
     });
-  };
+  }
 
   // ── Handle stop signal from main isolate ──
   service.on(_kInvokeStop).listen((_) async {
