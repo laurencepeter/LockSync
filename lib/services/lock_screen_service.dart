@@ -591,7 +591,7 @@ class _BgServiceRunner {
 
 // ─── Background isolate entry point ─────────────────────────────────
 @pragma('vm:entry-point')
-void _backgroundMain(ServiceInstance service) async {
+Future<void> _backgroundMain(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
 
