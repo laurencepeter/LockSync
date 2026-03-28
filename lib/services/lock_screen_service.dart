@@ -218,6 +218,7 @@ void _backgroundMain(ServiceInstance service) async {
   Timer? reconnectTimer;
   bool active = false;
   int reconnectAttempts = 0;
+  late void Function() scheduleReconnect;
 
   // ── Helper: show / update the lock screen message notification ──
   Future<void> showMessageNotif(String text) async {
@@ -540,7 +541,7 @@ void _backgroundMain(ServiceInstance service) async {
   }
 
   // ── Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap) ──
-  void scheduleReconnect() {
+  scheduleReconnect = () {
     reconnectTimer?.cancel();
     final delaySec = (1 << reconnectAttempts).clamp(1, 30);
     if (reconnectAttempts < 5) reconnectAttempts++;
@@ -548,7 +549,7 @@ void _backgroundMain(ServiceInstance service) async {
       reconnectTimer = null;
       if (active) connect();
     });
-  }
+  };
 
   // ── Handle stop signal from main isolate ──
   service.on(_kInvokeStop).listen((_) async {
