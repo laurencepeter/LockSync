@@ -311,6 +311,17 @@ class _BgServiceRunner {
     }
   }
 
+  // ── Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap) ──
+  void scheduleReconnect() {
+    reconnectTimer?.cancel();
+    final delaySec = (1 << reconnectAttempts).clamp(1, 30);
+    if (reconnectAttempts < 5) reconnectAttempts++;
+    reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      reconnectTimer = null;
+      if (active) connect();
+    });
+  }
+
   // ── Connect WebSocket and start relaying ──
   Future<void> connect() async {
     final prefs = await SharedPreferences.getInstance();
@@ -523,17 +534,6 @@ class _BgServiceRunner {
     } catch (_) {
       if (active) scheduleReconnect();
     }
-  }
-
-  // ── Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap) ──
-  void scheduleReconnect() {
-    reconnectTimer?.cancel();
-    final delaySec = (1 << reconnectAttempts).clamp(1, 30);
-    if (reconnectAttempts < 5) reconnectAttempts++;
-    reconnectTimer = Timer(Duration(seconds: delaySec), () {
-      reconnectTimer = null;
-      if (active) connect();
-    });
   }
 
   // ── Wire up service event listeners and kick off the initial connection ──
