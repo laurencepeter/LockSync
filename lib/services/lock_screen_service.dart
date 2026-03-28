@@ -303,8 +303,9 @@ class _BgServiceRunner {
 
   // ── Helper: update the foreground service notification (Android) ──
   void updateServiceNotif(String content) {
-    if (service is AndroidServiceInstance) {
-      service.setForegroundNotificationInfo(
+    final svc = service;
+    if (svc is AndroidServiceInstance) {
+      svc.setForegroundNotificationInfo(
         title: 'LockSync',
         content: content,
       );
