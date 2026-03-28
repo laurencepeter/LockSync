@@ -199,18 +199,14 @@ Future<bool> _iosBackground(ServiceInstance service) async {
   return true;
 }
 
-// ─── Background isolate entry point ─────────────────────────────────
-@pragma('vm:entry-point')
-void _backgroundMain(ServiceInstance service) async {
-  WidgetsFlutterBinding.ensureInitialized();
-  DartPluginRegistrant.ensureInitialized();
-
-  final notifs = FlutterLocalNotificationsPlugin();
-  const initSettings = InitializationSettings(
-    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    iOS: DarwinInitializationSettings(),
-  );
-  await notifs.initialize(initSettings);
+// ─── Background isolate state ─────────────────────────────────────────────
+//
+// Encapsulates all mutable state and helpers for the background isolate so
+// that [connect] and [scheduleReconnect] can refer to each other freely as
+// ordinary instance methods — no forward-reference tricks required.
+class _BgServiceRunner {
+  final ServiceInstance service;
+  final FlutterLocalNotificationsPlugin notifs;
 
   WebSocketChannel? channel;
   StreamSubscription? wsSub;
@@ -218,7 +214,8 @@ void _backgroundMain(ServiceInstance service) async {
   Timer? reconnectTimer;
   bool active = false;
   int reconnectAttempts = 0;
-  late void Function() scheduleReconnect;
+
+  _BgServiceRunner(this.service, this.notifs);
 
   // ── Helper: show / update the lock screen message notification ──
   Future<void> showMessageNotif(String text) async {
@@ -271,8 +268,7 @@ void _backgroundMain(ServiceInstance service) async {
   }
 
   // ── Helper: widget update notification ──
-  Future<void> showWidgetNotif(
-      String widgetType, String partnerName) async {
+  Future<void> showWidgetNotif(String widgetType, String partnerName) async {
     const labels = <String, String>{
       'grocery': 'updated the grocery list',
       'watchlist': 'updated the watchlist',
@@ -361,8 +357,7 @@ void _backgroundMain(ServiceInstance service) async {
             case 'sync':
               final payload = msg['payload'];
               if (payload is Map) {
-                final syncType =
-                    payload['syncType'] as String? ?? 'text';
+                final syncType = payload['syncType'] as String? ?? 'text';
 
                 // Always relay to the main isolate so it can update the
                 // wallpaper even while the phone is locked.
@@ -385,10 +380,9 @@ void _backgroundMain(ServiceInstance service) async {
 
                 // Nudge notification
                 if (syncType == 'nudge') {
-                  final prefs = await SharedPreferences.getInstance();
+                  final p = await SharedPreferences.getInstance();
                   final partnerName =
-                      prefs.getString('locksync_partner_name') ??
-                          'Your partner';
+                      p.getString('locksync_partner_name') ?? 'Your partner';
                   await showNudgeNotif(partnerName);
                 }
 
@@ -397,10 +391,9 @@ void _backgroundMain(ServiceInstance service) async {
                     syncType == 'watchlist' ||
                     syncType == 'reminder' ||
                     syncType == 'countdown') {
-                  final prefs = await SharedPreferences.getInstance();
+                  final p = await SharedPreferences.getInstance();
                   final partnerName =
-                      prefs.getString('locksync_partner_name') ??
-                          'Your partner';
+                      p.getString('locksync_partner_name') ?? 'Your partner';
                   await showWidgetNotif(syncType, partnerName);
                   // Also persist widget data so next open shows latest
                   const widgetKeys = <String, String>{
@@ -412,21 +405,19 @@ void _backgroundMain(ServiceInstance service) async {
                   final items = payload['items'];
                   final storageKey = widgetKeys[syncType];
                   if (items != null && storageKey != null) {
-                    final prefs2 = await SharedPreferences.getInstance();
-                    await prefs2.setString(storageKey, jsonEncode(items));
+                    final p2 = await SharedPreferences.getInstance();
+                    await p2.setString(storageKey, jsonEncode(items));
                   }
                 }
 
                 // Moment notification
                 if (syncType == 'moment') {
-                  final prefs = await SharedPreferences.getInstance();
+                  final p = await SharedPreferences.getInstance();
                   final partnerName =
-                      prefs.getString('locksync_partner_name') ??
-                          'Your partner';
+                      p.getString('locksync_partner_name') ?? 'Your partner';
                   final mediaType =
                       payload['mediaType'] as String? ?? 'image';
-                  final label =
-                      mediaType == 'video' ? 'a video' : 'a photo';
+                  final label = mediaType == 'video' ? 'a video' : 'a photo';
                   await notifs.show(
                     _kNotifIdWidget,
                     '$partnerName sent you $label',
@@ -448,16 +439,12 @@ void _backgroundMain(ServiceInstance service) async {
                     ),
                   );
                   // Persist the moment
-                  final momentsRaw =
-                      prefs.getString('locksync_moments');
+                  final momentsRaw = p.getString('locksync_moments');
                   final moments = momentsRaw != null
                       ? (jsonDecode(momentsRaw) as List)
                       : [];
-                  moments.insert(
-                      0,
-                      Map<String, dynamic>.from(payload));
-                  await prefs.setString(
-                      'locksync_moments', jsonEncode(moments));
+                  moments.insert(0, Map<String, dynamic>.from(payload));
+                  await p.setString('locksync_moments', jsonEncode(moments));
                 }
 
                 // Persist canvas JSON and render the wallpaper so the lock
@@ -465,13 +452,12 @@ void _backgroundMain(ServiceInstance service) async {
                 if (syncType == 'canvas') {
                   final canvasData = payload['canvasData'];
                   if (canvasData != null) {
-                    final prefs = await SharedPreferences.getInstance();
+                    final p = await SharedPreferences.getInstance();
                     // Default to true — matches StorageService.autoUpdateWallpaper
-                    final autoUpdate = prefs.getBool(
-                            'locksync_auto_update_wallpaper') ??
-                        true;
+                    final autoUpdate =
+                        p.getBool('locksync_auto_update_wallpaper') ?? true;
                     if (autoUpdate) {
-                      await prefs.setString(
+                      await p.setString(
                         'bg_last_canvas_json',
                         jsonEncode(canvasData),
                       );
@@ -506,8 +492,7 @@ void _backgroundMain(ServiceInstance service) async {
                           final file =
                               File('${dir.path}/locksync_bg_wallpaper.png');
                           await file.writeAsBytes(bytes);
-                          await prefs.setBool(
-                              'bg_wallpaper_pending', true);
+                          await p.setBool('bg_wallpaper_pending', true);
                         }
                       } catch (e) {
                         // Log but don't crash the background service
@@ -541,7 +526,7 @@ void _backgroundMain(ServiceInstance service) async {
   }
 
   // ── Reconnect with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap) ──
-  scheduleReconnect = () {
+  void scheduleReconnect() {
     reconnectTimer?.cancel();
     final delaySec = (1 << reconnectAttempts).clamp(1, 30);
     if (reconnectAttempts < 5) reconnectAttempts++;
@@ -549,54 +534,73 @@ void _backgroundMain(ServiceInstance service) async {
       reconnectTimer = null;
       if (active) connect();
     });
-  };
+  }
 
-  // ── Handle stop signal from main isolate ──
-  service.on(_kInvokeStop).listen((_) async {
-    active = false;
-    reconnectTimer?.cancel();
-    reconnectTimer = null;
-    pingTimer?.cancel();
-    await wsSub?.cancel();
-    await channel?.sink.close();
-    channel = null;
-    await notifs.cancel(_kNotifIdMessage);
-    service.stopSelf();
-  });
+  // ── Wire up service event listeners and kick off the initial connection ──
+  void run() {
+    // ── Handle stop signal from main isolate ──
+    service.on(_kInvokeStop).listen((_) async {
+      active = false;
+      reconnectTimer?.cancel();
+      reconnectTimer = null;
+      pingTimer?.cancel();
+      await wsSub?.cancel();
+      await channel?.sink.close();
+      channel = null;
+      await notifs.cancel(_kNotifIdMessage);
+      service.stopSelf();
+    });
 
-  // ── Handle start / re-credential signal ──
-  service.on(_kInvokeStart).listen((_) async {
-    active = true;
-    reconnectTimer?.cancel();
-    reconnectTimer = null;
-    reconnectAttempts = 0;
-    await wsSub?.cancel();
-    await channel?.sink.close();
-    channel = null;
-    connect();
-  });
-
-  // ── Pause WS while the main app is in the foreground ──
-  // Prevents dual-connection conflicts that cause the main isolate to
-  // get kicked off the server when the user is editing the canvas.
-  service.on(_kInvokePause).listen((_) async {
-    reconnectTimer?.cancel();
-    reconnectTimer = null;
-    pingTimer?.cancel();
-    await wsSub?.cancel();
-    await channel?.sink.close();
-    channel = null;
-  });
-
-  // ── Resume WS when the app goes back to the background ──
-  service.on(_kInvokeResume).listen((_) async {
-    if (active) {
+    // ── Handle start / re-credential signal ──
+    service.on(_kInvokeStart).listen((_) async {
+      active = true;
+      reconnectTimer?.cancel();
+      reconnectTimer = null;
       reconnectAttempts = 0;
+      await wsSub?.cancel();
+      await channel?.sink.close();
+      channel = null;
       connect();
-    }
-  });
+    });
 
-  // Auto-start on service launch
-  active = true;
-  connect();
+    // ── Pause WS while the main app is in the foreground ──
+    // Prevents dual-connection conflicts that cause the main isolate to
+    // get kicked off the server when the user is editing the canvas.
+    service.on(_kInvokePause).listen((_) async {
+      reconnectTimer?.cancel();
+      reconnectTimer = null;
+      pingTimer?.cancel();
+      await wsSub?.cancel();
+      await channel?.sink.close();
+      channel = null;
+    });
+
+    // ── Resume WS when the app goes back to the background ──
+    service.on(_kInvokeResume).listen((_) async {
+      if (active) {
+        reconnectAttempts = 0;
+        connect();
+      }
+    });
+
+    // Auto-start on service launch
+    active = true;
+    connect();
+  }
+}
+
+// ─── Background isolate entry point ─────────────────────────────────
+@pragma('vm:entry-point')
+void _backgroundMain(ServiceInstance service) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
+
+  final notifs = FlutterLocalNotificationsPlugin();
+  const initSettings = InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    iOS: DarwinInitializationSettings(),
+  );
+  await notifs.initialize(initSettings);
+
+  _BgServiceRunner(service, notifs).run();
 }
