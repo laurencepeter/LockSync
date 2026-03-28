@@ -14,8 +14,14 @@ import 'theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize lock screen background service + notification channels
-  await LockScreenService.initialize();
+  // Initialize lock screen background service + notification channels.
+  // Wrapped in try-catch so a failure (e.g. foreground-service restrictions on
+  // certain Android versions) doesn't crash the app on first launch.
+  try {
+    await LockScreenService.initialize();
+  } catch (e) {
+    debugPrint('[LockSync] Background service init failed: $e');
+  }
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,

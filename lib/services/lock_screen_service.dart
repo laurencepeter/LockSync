@@ -101,7 +101,7 @@ class LockScreenService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: _backgroundMain,
-        autoStart: true,
+        autoStart: false,
         isForegroundMode: true,
         notificationChannelId: _kNotifChannelService,
         initialNotificationTitle: 'LockSync',
