@@ -347,7 +347,13 @@ class _BgServiceRunner {
 
       wsSub = channel!.stream.listen(
         (raw) async {
-          final msg = jsonDecode(raw as String) as Map<String, dynamic>;
+          final Map<String, dynamic> msg;
+          try {
+            msg = jsonDecode(raw as String) as Map<String, dynamic>;
+          } catch (e) {
+            debugPrint('[BG] Malformed WebSocket message, skipping: $e');
+            return;
+          }
           final type = msg['type'] as String?;
 
           switch (type) {

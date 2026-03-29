@@ -22,12 +22,18 @@ class CanvasStroke {
       };
 
   factory CanvasStroke.fromJson(Map<String, dynamic> json) {
+    final rawPoints = json['points'];
+    final points = (rawPoints is List)
+        ? rawPoints
+            .where((p) => p is List && p.length >= 2)
+            .map((p) =>
+                Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()))
+            .toList()
+        : <Offset>[];
     return CanvasStroke(
-      points: (json['points'] as List)
-          .map((p) => Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()))
-          .toList(),
-      color: json['color'] as int,
-      thickness: (json['thickness'] as num).toDouble(),
+      points: points,
+      color: (json['color'] as num?)?.toInt() ?? 0xFFFFFFFF,
+      thickness: (json['thickness'] as num?)?.toDouble() ?? 2.0,
       isEraser: json['isEraser'] as bool? ?? false,
     );
   }

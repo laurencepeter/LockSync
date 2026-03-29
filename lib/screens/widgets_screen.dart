@@ -223,7 +223,8 @@ class _GroceryScreenState extends State<GroceryScreen> {
     _syncSub = ws.onWidgetSync.listen((data) {
       if (data['syncType'] == 'grocery' && mounted) {
         setState(() {
-          _items = (data['items'] as List).cast<Map<String, dynamic>>();
+          _items = List<Map<String, dynamic>>.from(
+                    (data['items'] as List? ?? []).whereType<Map>());
         });
         _saveLocal();
       }
@@ -444,7 +445,8 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
     _syncSub = ws.onWidgetSync.listen((data) {
       if (data['syncType'] == 'watchlist' && mounted) {
         setState(() {
-          _items = (data['items'] as List).cast<Map<String, dynamic>>();
+          _items = List<Map<String, dynamic>>.from(
+                    (data['items'] as List? ?? []).whereType<Map>());
         });
         _saveLocal();
       }
@@ -680,7 +682,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
     _syncSub = ws.onWidgetSync.listen((data) {
       if (data['syncType'] == 'reminder' && mounted) {
         setState(() {
-          _reminders = (data['items'] as List).cast<Map<String, dynamic>>();
+          _reminders = List<Map<String, dynamic>>.from(
+                    (data['items'] as List? ?? []).whereType<Map>());
         });
         _saveLocal();
       }
@@ -993,7 +996,8 @@ class _CountdownScreenState extends State<CountdownScreen> {
     _syncSub = ws.onWidgetSync.listen((data) {
       if (data['syncType'] == 'countdown' && mounted) {
         setState(() {
-          _countdowns = (data['items'] as List).cast<Map<String, dynamic>>();
+          _countdowns = List<Map<String, dynamic>>.from(
+                    (data['items'] as List? ?? []).whereType<Map>());
         });
         _saveLocal();
       }
