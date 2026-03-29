@@ -194,21 +194,20 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
                 if (show) {
                     activity.window.addFlags(
                         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
                     )
                 } else {
                     activity.window.clearFlags(
                         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
                     )
                 }
             }
-            // Also request dismiss keyguard on API 26+ for full interaction
-            if (show && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val keyguardManager = activity.getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
-                keyguardManager?.requestDismissKeyguard(activity, null)
+            // Keep screen on while the app is visible over the lock screen
+            if (show) {
+                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
             result.success(true)
         } catch (e: Exception) {

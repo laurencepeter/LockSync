@@ -762,11 +762,9 @@ class _SyncScreenState extends State<SyncScreen>
             title: 'Grocery Checklist',
             subtitle: 'Shared shopping list',
             onTap: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                isScrollControlled: true,
-                builder: (_) => const WidgetDrawer(),
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const GroceryScreen()),
               );
             },
           ),
@@ -776,11 +774,9 @@ class _SyncScreenState extends State<SyncScreen>
             title: 'Watchlist',
             subtitle: 'Movies & shows to watch together',
             onTap: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                isScrollControlled: true,
-                builder: (_) => const WidgetDrawer(),
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WatchlistScreen()),
               );
             },
           ),
@@ -790,11 +786,9 @@ class _SyncScreenState extends State<SyncScreen>
             title: 'Reminders',
             subtitle: 'Shared reminders for each other',
             onTap: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                isScrollControlled: true,
-                builder: (_) => const WidgetDrawer(),
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const RemindersScreen()),
               );
             },
           ),
@@ -804,11 +798,9 @@ class _SyncScreenState extends State<SyncScreen>
             title: 'Countdowns',
             subtitle: 'Count down to special dates',
             onTap: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                isScrollControlled: true,
-                builder: (_) => const WidgetDrawer(),
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CountdownScreen()),
               );
             },
           ),
