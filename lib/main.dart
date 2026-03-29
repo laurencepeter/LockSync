@@ -98,7 +98,20 @@ class LockSyncApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) {
         final ws = WebSocketService(storage: storage);
-        ws.connect();
+        // If already paired, pause the background service first so both
+        // isolates don't try to authenticate at the same time — the server
+        // drops one connection when it sees two for the same device, which
+        // caused infinite reconnect loops and eventual crash on cold start.
+        if (storage.isPaired) {
+          LockScreenService.pause();
+          // Delay the main connect to give the background service time to
+          // release its WebSocket (mirrors the logic in _handleAppResumed).
+          Future.delayed(const Duration(milliseconds: 500), () {
+            ws.connect();
+          });
+        } else {
+          ws.connect();
+        }
         return ws;
       },
       child: MaterialApp(
@@ -124,9 +137,10 @@ class _InitialRouteState extends State<_InitialRoute> {
   @override
   void initState() {
     super.initState();
-    // Auto-start the background service when the app launches with an
-    // existing pair session — keeps the lock screen updated even if the
-    // user doesn't interact with the app.
+    // Schedule the background service start after the main WebSocket has had
+    // time to connect. Starting both simultaneously caused the server to see
+    // two connections for the same device and drop one, leading to an infinite
+    // reconnect loop that eventually crashed the app.
     _autoStartBackgroundService();
   }
 
@@ -136,6 +150,9 @@ class _InitialRouteState extends State<_InitialRoute> {
         s.accessToken != null &&
         s.pairId != null &&
         s.partnerId != null) {
+      // Wait for the main WebSocket to finish its initial connect before
+      // starting the background service (which opens its own connection).
+      await Future.delayed(const Duration(seconds: 2));
       await LockScreenService.start(
         serverUrl: const String.fromEnvironment(
           'WS_URL',
@@ -159,13 +176,41 @@ class _InitialRouteState extends State<_InitialRoute> {
       return const SyncScreen();
     }
 
-    // Stored session exists (reconnecting after close / network drop) →
-    // go to sync so it can show the reconnecting banner rather than
-    // landing on the "Pair Devices" welcome screen.
+    // Stored session exists (reconnecting after close / network drop).
+    // Wait until the WebSocket is at least in the 'connecting' or
+    // 'connected' state before showing SyncScreen so we don't render it
+    // while the service is still completely uninitialised (which caused
+    // stream-subscription crashes on cold start after first pairing).
     if (widget.storage.isPaired) {
+      if (ws.status == ConnectionStatus.disconnected && !ws.isReconnecting) {
+        // Still waiting for the delayed connect — show a loading screen
+        return const _ReconnectingSplash();
+      }
       return const SyncScreen();
     }
 
     return const WelcomeScreen();
+  }
+}
+
+/// Minimal splash shown while the WebSocket reconnects on cold start.
+/// Prevents SyncScreen from rendering before the service is ready.
+class _ReconnectingSplash extends StatelessWidget {
+  const _ReconnectingSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(strokeWidth: 2),
+            SizedBox(height: 16),
+            Text('Reconnecting…', style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+      ),
+    );
   }
 }
