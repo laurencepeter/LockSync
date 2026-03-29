@@ -354,7 +354,7 @@ class _SyncScreenState extends State<SyncScreen>
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
     final partnerText = ws.partnerText;
-    final partnerName = ws.partnerDisplayName ?? 'Partner';
+    final partnerName = ws.partnerDisplayName ?? ws.storage.partnerName ?? 'Partner';
     final partnerMood = ws.partnerMood;
 
     // Navigate to welcome only when the session is explicitly cleared
