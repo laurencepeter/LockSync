@@ -147,6 +147,7 @@ class _SyncScreenState extends State<SyncScreen>
       final granted = await WallpaperService.checkOverlayPermission();
       if (!granted && mounted) {
         await storage.setOverlayPermissionRequested(true);
+        if (!mounted) return;
         final go = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
@@ -183,6 +184,7 @@ class _SyncScreenState extends State<SyncScreen>
       final granted = await WallpaperService.checkFullScreenIntentPermission();
       if (!granted && mounted) {
         await storage.setFullScreenIntentPermissionRequested(true);
+        if (!mounted) return;
         final go = await showDialog<bool>(
           context: context,
           barrierDismissible: false,

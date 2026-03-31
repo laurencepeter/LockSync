@@ -48,8 +48,8 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
 
   Future<void> _save() async {
     final storage = context.read<WebSocketService>().storage;
-    await storage.setMenuPrimaryColor(_primaryColor.value);
-    await storage.setMenuAccentColor(_accentColor.value);
+    await storage.setMenuPrimaryColor(_primaryColor.toARGB32());
+    await storage.setMenuAccentColor(_accentColor.toARGB32());
     await storage.setMenuFont(_font);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
