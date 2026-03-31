@@ -129,6 +129,90 @@ class _SyncScreenState extends State<SyncScreen>
     }
     // Always ensure the app can display over the lock screen
     WallpaperService.setShowOnLockScreen(true);
+    // Request the permissions that let LockSync appear on the lock screen
+    // even when it wasn't the last app open — the core selling-point feature.
+    _requestLockScreenPermissions();
+  }
+
+  /// Request SYSTEM_ALERT_WINDOW and USE_FULL_SCREEN_INTENT permissions so
+  /// the app can show over the lock screen without needing to be the last
+  /// foreground app.  Shows a plain-language explanation before opening the
+  /// relevant system Settings page, and only prompts once.
+  Future<void> _requestLockScreenPermissions() async {
+    if (!mounted) return;
+    final storage = context.read<WebSocketService>().storage;
+
+    // ── Overlay (draw-over-apps) permission ──────────────────────────────────
+    if (!storage.overlayPermissionRequested) {
+      final granted = await WallpaperService.checkOverlayPermission();
+      if (!granted && mounted) {
+        await storage.setOverlayPermissionRequested(true);
+        final go = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Show on Lock Screen',
+                style: TextStyle(color: Colors.white, fontSize: 18)),
+            content: const Text(
+              'LockSync needs the "Display over other apps" permission so '
+              'your canvas and messages appear on the lock screen even when '
+              'the app isn\'t already open.\n\n'
+              'On the next screen, find LockSync and enable the permission.',
+              style: TextStyle(color: Colors.white70, height: 1.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Not Now', style: TextStyle(color: Colors.white54)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
+        if (go == true) await WallpaperService.requestOverlayPermission();
+      }
+    }
+
+    // ── Full-screen intent permission (Android 14+) ──────────────────────────
+    if (mounted && !storage.fullScreenIntentPermissionRequested) {
+      final granted = await WallpaperService.checkFullScreenIntentPermission();
+      if (!granted && mounted) {
+        await storage.setFullScreenIntentPermissionRequested(true);
+        final go = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Lock Screen Alerts',
+                style: TextStyle(color: Colors.white, fontSize: 18)),
+            content: const Text(
+              'LockSync needs the "Full-screen notifications" permission to '
+              'wake your screen and show messages from your partner directly '
+              'on the lock screen — no unlock required.\n\n'
+              'On the next screen, enable it for LockSync.',
+              style: TextStyle(color: Colors.white70, height: 1.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Not Now', style: TextStyle(color: Colors.white54)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
+        if (go == true) await WallpaperService.requestFullScreenIntentPermission();
+      }
+    }
   }
 
   @override

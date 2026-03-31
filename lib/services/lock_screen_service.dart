@@ -178,6 +178,33 @@ class LockScreenService {
         );
   }
 
+  /// Show a nudge notification from the main (foreground) isolate.
+  /// Called by WebSocketService when a nudge arrives while the app is open
+  /// and the background-service WebSocket is paused.
+  static Future<void> showForegroundNudge(String partnerName) async {
+    await _notifs.show(
+      _kNotifIdNudge,
+      '$partnerName nudged you! 📳',
+      'Tap to open LockSync',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _kNotifChannelNudge,
+          'LockSync Nudges',
+          importance: Importance.max,
+          priority: Priority.max,
+          visibility: NotificationVisibility.public,
+          fullScreenIntent: true,
+          autoCancel: true,
+          ongoing: false,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+        ),
+      ),
+    );
+  }
+
   /// Request permission to post notifications (Android 13+ / iOS).
   static Future<void> requestPermissions() async {
     await _notifs
@@ -232,6 +259,8 @@ class _BgServiceRunner {
           // PUBLIC = show full content on lock screen without unlocking
           visibility: NotificationVisibility.public,
           styleInformation: BigTextStyleInformation(text),
+          // Wake the screen and display the app over the lock screen
+          fullScreenIntent: true,
           ongoing: false,
           autoCancel: false,
         ),
@@ -256,6 +285,8 @@ class _BgServiceRunner {
           importance: Importance.max,
           priority: Priority.max,
           visibility: NotificationVisibility.public,
+          // Wake the screen and show the app over the lock screen
+          fullScreenIntent: true,
           autoCancel: true,
           ongoing: false,
         ),
@@ -559,6 +590,12 @@ class _BgServiceRunner {
     });
 
     // ── Handle start / re-credential signal ──
+    // Only mark the service as active and tear down any stale connection.
+    // Do NOT call connect() here — the app is still in the foreground when
+    // this fires (called from _autoStartBackgroundService 2 s after launch).
+    // The actual connection is deferred until the app backgrounds and
+    // _kInvokeResume fires, preventing the dual-connection race that caused
+    // the server to drop the main isolate's WebSocket on cold start.
     service.on(_kInvokeStart).listen((_) async {
       active = true;
       reconnectTimer?.cancel();
@@ -567,7 +604,7 @@ class _BgServiceRunner {
       await wsSub?.cancel();
       await channel?.sink.close();
       channel = null;
-      connect();
+      // Connection will be established by _kInvokeResume when app backgrounds.
     });
 
     // ── Pause WS while the main app is in the foreground ──
@@ -590,9 +627,12 @@ class _BgServiceRunner {
       }
     });
 
-    // Auto-start on service launch
-    active = true;
-    connect();
+    // Do NOT auto-connect here. The service starts while the app is still in
+    // the foreground; connecting immediately would create a dual-WebSocket
+    // race with the main isolate's connection. The _kInvokeResume event
+    // (fired by WebSocketService._handleAppBackgrounded) triggers the actual
+    // connection once the app moves to the background.
+    active = false; // will be set true by _kInvokeStart
   }
 }
 

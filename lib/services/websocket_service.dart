@@ -394,6 +394,10 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         break;
       case 'nudge':
         _nudgeController.add(null);
+        // Also fire a local notification so the nudge appears even when the
+        // app is in the foreground but the screen may be turning off.
+        final partnerName = storage.partnerName ?? 'Your partner';
+        LockScreenService.showForegroundNudge(partnerName);
         break;
       case 'reaction':
         _reactionController.add(payload);

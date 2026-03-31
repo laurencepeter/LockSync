@@ -20,8 +20,15 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
-    <!-- Full-screen intent on lock screen (flutter_local_notifications) -->
+    <!-- Full-screen intent — wake + show the app over the lock screen.
+         On Android 14+ the user must explicitly grant this in System Settings;
+         we request it via Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENTS. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- Draw over other apps (lock screen overlay when app is not in foreground).
+         Required for the app to appear on the lock screen without the user
+         having had it open last. Runtime request via
+         Settings.ACTION_MANAGE_OVERLAY_PERMISSION. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
 
     <!-- Camera (QR scanner) -->
     <uses-permission android:name="android.permission.CAMERA"/>
