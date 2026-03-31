@@ -114,7 +114,7 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val activity = activityBinding?.activity ?: run { result.success(false); return }
             val intent = Intent(
-                Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENTS,
+                "android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENTS",
                 Uri.parse("package:${activity.packageName}")
             )
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
