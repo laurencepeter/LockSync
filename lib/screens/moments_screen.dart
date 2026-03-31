@@ -160,13 +160,37 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   Future<void> _openComposer() async {
     final ws = context.read<WebSocketService>();
+    // Guard: must be paired before opening the composer so the user doesn't
+    // compose a moment only to have it silently dropped when they hit Send.
+    if (ws.status != ConnectionStatus.paired) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Not connected — wait for the connection to restore.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => MomentComposerScreen(
           senderName: ws.storage.displayName ?? 'Me',
           onSend: (moment) {
-            ws.sendWidgetSync('moment', moment.toJson());
+            if (ws.status == ConnectionStatus.paired) {
+              ws.sendWidgetSync('moment', moment.toJson());
+            } else {
+              // Surface an error if connection dropped between open and send
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Send failed — reconnecting. Try again shortly.'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            }
           },
         ),
       ),

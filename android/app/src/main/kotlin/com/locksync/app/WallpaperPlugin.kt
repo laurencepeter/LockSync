@@ -1,12 +1,15 @@
 package com.locksync.app
 
 import android.app.WallpaperManager
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -65,10 +68,60 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "setLockScreenWallpaper" -> handleSetWallpaper(call, result)
-            "setShowOnLockScreen"   -> handleShowOnLockScreen(call, result)
-            "getScreenDimensions"   -> handleGetScreenDimensions(result)
-            else                    -> result.notImplemented()
+            "setLockScreenWallpaper"          -> handleSetWallpaper(call, result)
+            "setShowOnLockScreen"             -> handleShowOnLockScreen(call, result)
+            "getScreenDimensions"             -> handleGetScreenDimensions(result)
+            "checkOverlayPermission"          -> handleCheckOverlayPermission(result)
+            "requestOverlayPermission"        -> handleRequestOverlayPermission(result)
+            "checkFullScreenIntentPermission" -> handleCheckFullScreenIntentPermission(result)
+            "requestFullScreenIntentPermission" -> handleRequestFullScreenIntentPermission(result)
+            else                              -> result.notImplemented()
+        }
+    }
+
+    // ── Overlay (SYSTEM_ALERT_WINDOW) permission ─────────────────────────────
+
+    private fun handleCheckOverlayPermission(result: MethodChannel.Result) {
+        val ctx = appContext ?: run { result.success(false); return }
+        result.success(Settings.canDrawOverlays(ctx))
+    }
+
+    private fun handleRequestOverlayPermission(result: MethodChannel.Result) {
+        val activity = activityBinding?.activity ?: run { result.success(false); return }
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${activity.packageName}")
+        )
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        activity.startActivity(intent)
+        result.success(true)
+    }
+
+    // ── USE_FULL_SCREEN_INTENT permission (Android 14+) ──────────────────────
+
+    private fun handleCheckFullScreenIntentPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val ctx = appContext ?: run { result.success(false); return }
+            val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+            result.success(nm?.canUseFullScreenIntent() ?: false)
+        } else {
+            // Implicitly granted before Android 14
+            result.success(true)
+        }
+    }
+
+    private fun handleRequestFullScreenIntentPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val activity = activityBinding?.activity ?: run { result.success(false); return }
+            val intent = Intent(
+                Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENTS,
+                Uri.parse("package:${activity.packageName}")
+            )
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(intent)
+            result.success(true)
+        } else {
+            result.success(true)
         }
     }
 

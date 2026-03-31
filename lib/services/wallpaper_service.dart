@@ -178,6 +178,44 @@ class WallpaperService {
     } catch (_) {}
   }
 
+  // ── Lock-screen overlay & full-screen-intent permissions ─────────────────
+
+  /// Whether the SYSTEM_ALERT_WINDOW (draw-over-apps) permission is granted.
+  static Future<bool> checkOverlayPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _channel.invokeMethod('checkOverlayPermission') as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Open the system Settings page where the user can grant overlay permission.
+  static Future<void> requestOverlayPermission() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestOverlayPermission');
+    } catch (_) {}
+  }
+
+  /// Whether USE_FULL_SCREEN_INTENT is granted (Android 14+ only).
+  static Future<bool> checkFullScreenIntentPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _channel.invokeMethod('checkFullScreenIntentPermission') as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Open the system Settings page to grant USE_FULL_SCREEN_INTENT (Android 14+).
+  static Future<void> requestFullScreenIntentPermission() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestFullScreenIntentPermission');
+    } catch (_) {}
+  }
+
   /// Save the latest canvas image to gallery (for iOS "refresh & save")
   static Future<void> saveToGallery(
     Uint8List imageBytes, {

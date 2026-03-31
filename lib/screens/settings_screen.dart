@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/websocket_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
+import 'customization_screen.dart';
+import 'developer_screen.dart';
 import 'display_name_screen.dart';
 import 'memory_wall_screen.dart';
 
@@ -15,6 +18,105 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  // Hidden developer menu: tap the "Settings" title 5 times → PIN dialog.
+  int _titleTapCount = 0;
+  DateTime? _lastTitleTap;
+
+  void _onTitleTap() {
+    final now = DateTime.now();
+    // Reset counter if more than 2 s between taps
+    if (_lastTitleTap != null &&
+        now.difference(_lastTitleTap!).inSeconds > 2) {
+      _titleTapCount = 0;
+    }
+    _lastTitleTap = now;
+    _titleTapCount++;
+    if (_titleTapCount >= 5) {
+      _titleTapCount = 0;
+      HapticFeedback.mediumImpact();
+      _showPinDialog();
+    }
+  }
+
+  /// Show the PIN entry dialog.
+  /// 0000 → Customization   (colors & fonts)
+  /// 1793 → Developer mode  (pairing)
+  void _showPinDialog() {
+    final pinController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Enter PIN',
+            style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: pinController,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          maxLength: 4,
+          obscureText: true,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 24, letterSpacing: 8),
+          textAlign: TextAlign.center,
+          decoration: InputDecoration(
+            counterText: '',
+            hintText: '••••',
+            hintStyle: TextStyle(
+                color: Colors.white.withValues(alpha: 0.2),
+                letterSpacing: 8),
+          ),
+          onSubmitted: (pin) {
+            Navigator.pop(ctx);
+            _handlePin(pin);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final pin = pinController.text;
+              Navigator.pop(ctx);
+              _handlePin(pin);
+            },
+            child: const Text('Unlock'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handlePin(String pin) {
+    switch (pin) {
+      case '0000':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => const CustomizationScreen()),
+        );
+        break;
+      case '1793':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => const DeveloperScreen()),
+        );
+        break;
+      default:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Incorrect PIN.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
@@ -36,9 +138,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: () => Navigator.pop(context),
                     ),
                     const Spacer(),
-                    Text(
-                      'Settings',
-                      style: Theme.of(context).textTheme.headlineMedium,
+                    GestureDetector(
+                      onTap: _onTitleTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: Text(
+                        'Settings',
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
                     ),
                     const Spacer(),
                     const SizedBox(width: 48),

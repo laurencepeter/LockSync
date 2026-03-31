@@ -15,6 +15,11 @@ class StorageService {
   static const _keyMood = 'locksync_mood';
   static const _keyAutoUpdateWallpaper = 'locksync_auto_update_wallpaper';
   static const _keyAutoWallpaperPrompted = 'locksync_auto_wallpaper_prompted';
+  static const _keyOverlayPermissionRequested = 'locksync_overlay_permission_requested';
+  static const _keyFullScreenIntentPermissionRequested = 'locksync_fsi_permission_requested';
+  static const _keyMenuPrimaryColor = 'locksync_menu_primary_color';
+  static const _keyMenuAccentColor = 'locksync_menu_accent_color';
+  static const _keyMenuFont = 'locksync_menu_font';
   static const _keyCanvasState = 'locksync_canvas_state';
   static const _keyMemories = 'locksync_memories';
   static const _keyActiveTheme = 'locksync_active_theme';
@@ -87,6 +92,52 @@ class StorageService {
       _prefs.getBool(_keyAutoWallpaperPrompted) ?? false;
   Future<void> setAutoWallpaperPrompted(bool value) async {
     await _prefs.setBool(_keyAutoWallpaperPrompted, value);
+  }
+
+  // Permission request tracking (show each dialog only once)
+  bool get overlayPermissionRequested =>
+      _prefs.getBool(_keyOverlayPermissionRequested) ?? false;
+  Future<void> setOverlayPermissionRequested(bool value) async {
+    await _prefs.setBool(_keyOverlayPermissionRequested, value);
+  }
+
+  bool get fullScreenIntentPermissionRequested =>
+      _prefs.getBool(_keyFullScreenIntentPermissionRequested) ?? false;
+  Future<void> setFullScreenIntentPermissionRequested(bool value) async {
+    await _prefs.setBool(_keyFullScreenIntentPermissionRequested, value);
+  }
+
+  // UI customization (color/font overrides set from hidden settings menu)
+  // Stored as ints (ARGB) / strings; null means "use app default".
+  int? get menuPrimaryColor => _prefs.containsKey(_keyMenuPrimaryColor)
+      ? _prefs.getInt(_keyMenuPrimaryColor)
+      : null;
+  Future<void> setMenuPrimaryColor(int? color) async {
+    if (color == null) {
+      await _prefs.remove(_keyMenuPrimaryColor);
+    } else {
+      await _prefs.setInt(_keyMenuPrimaryColor, color);
+    }
+  }
+
+  int? get menuAccentColor => _prefs.containsKey(_keyMenuAccentColor)
+      ? _prefs.getInt(_keyMenuAccentColor)
+      : null;
+  Future<void> setMenuAccentColor(int? color) async {
+    if (color == null) {
+      await _prefs.remove(_keyMenuAccentColor);
+    } else {
+      await _prefs.setInt(_keyMenuAccentColor, color);
+    }
+  }
+
+  String? get menuFont => _prefs.getString(_keyMenuFont);
+  Future<void> setMenuFont(String? font) async {
+    if (font == null) {
+      await _prefs.remove(_keyMenuFont);
+    } else {
+      await _prefs.setString(_keyMenuFont, font);
+    }
   }
 
   // Active theme
