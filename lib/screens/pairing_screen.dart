@@ -108,6 +108,8 @@ class _PairingScreenState extends State<PairingScreen>
   void _navigateToDisplayName() {
     if (_navigated) return;
     _navigated = true;
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
     Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const DisplayNameScreen(isInitialSetup: true),
