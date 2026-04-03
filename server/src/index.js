@@ -321,8 +321,20 @@ function handleAuthenticate(ws, msg) {
   ws._authenticated = true;
 
   if (pair.deviceA.id === deviceId) {
+    // Close any stale connection from this device (e.g. background service
+    // that didn't disconnect cleanly before the main isolate reconnected).
+    // Without this, the old socket stays open but stops receiving forwarded
+    // messages, triggering infinite reconnect loops on the client.
+    if (pair.deviceA.ws && pair.deviceA.ws !== ws && pair.deviceA.ws.readyState === 1) {
+      console.log(`[AUTH] Closing stale connection for device ${deviceId.slice(0, 8)}…`);
+      pair.deviceA.ws.close(4001, 'Replaced by new connection');
+    }
     pair.deviceA.ws = ws;
   } else if (pair.deviceB.id === deviceId) {
+    if (pair.deviceB.ws && pair.deviceB.ws !== ws && pair.deviceB.ws.readyState === 1) {
+      console.log(`[AUTH] Closing stale connection for device ${deviceId.slice(0, 8)}…`);
+      pair.deviceB.ws.close(4001, 'Replaced by new connection');
+    }
     pair.deviceB.ws = ws;
   } else {
     sendError(ws, 'DEVICE_MISMATCH', 'Device not part of this pair');

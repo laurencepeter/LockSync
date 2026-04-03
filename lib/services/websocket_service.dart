@@ -47,6 +47,10 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _wallpaperDebounce;
   StreamSubscription? _bgServiceSub;
 
+  // Tracks whether this service has been disposed so async callbacks
+  // (timers, stream events) don't fire on closed controllers.
+  bool _disposed = false;
+
   // Foreground tracking — used to skip expensive canvas renders while the
   // app is in background (the background-service isolate handles those).
   bool _isInForeground = true;
@@ -91,6 +95,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   /// (i.e. when the phone is locked and the main WebSocket is inactive).
   void _listenToBackgroundService() {
     _bgServiceSub = LockScreenService.onMessage.listen((msg) {
+      if (_disposed) return;
       final payload = msg['payload'] as Map<String, dynamic>?;
       if (payload == null) return;
       final syncType = payload['syncType'] as String?;
@@ -183,14 +188,15 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     // Delay the main connect slightly to give the background service time to
     // actually close its WebSocket. This prevents the dual-connection race
     // where both try to authenticate at the same time and the server drops one.
-    if (_status == ConnectionStatus.disconnected ||
-        (_channel == null && storage.isPaired)) {
+    // Only reconnect if truly disconnected — skip if already connecting/connected
+    // (e.g. the initial delayed connect from LockSyncApp.build is still in-flight).
+    if (_status == ConnectionStatus.disconnected && storage.isPaired) {
       _isReconnecting = true;
       notifyListeners();
       _reconnectTimer?.cancel();
       _reconnectTimer = Timer(const Duration(milliseconds: 500), () {
         _reconnectTimer = null;
-        connect();
+        if (!_disposed) connect();
       });
       // _isReconnecting is cleared in the 'authenticated' message handler
       // once the server confirms the session is restored.
@@ -227,6 +233,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> connect() async {
+    if (_disposed) return;
     if (_status == ConnectionStatus.connecting ||
         _status == ConnectionStatus.connected ||
         _status == ConnectionStatus.paired) {
@@ -273,6 +280,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _onMessage(dynamic raw) {
+    if (_disposed) return;
     final msg = jsonDecode(raw as String) as Map<String, dynamic>;
     final type = msg['type'] as String?;
 
@@ -483,7 +491,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _wallpaperDebounce =
         Timer(const Duration(milliseconds: 800), () async {
       _wallpaperDebounce = null;
-      if (!_isInForeground || _wallpaperUpdateInProgress) return;
+      if (_disposed || !_isInForeground || _wallpaperUpdateInProgress) return;
       _wallpaperUpdateInProgress = true;
       try {
         final bytes = await CanvasRenderer.renderToBytes(canvasData);
@@ -696,7 +704,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(delay, () {
       _reconnectTimer = null;
-      if (_status == ConnectionStatus.disconnected) {
+      if (!_disposed && _status == ConnectionStatus.disconnected) {
         connect();
       }
     });
@@ -713,6 +721,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     // Cancel timers and subscriptions first to prevent callbacks firing
     // after stream controllers are closed
