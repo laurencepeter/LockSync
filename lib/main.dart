@@ -177,13 +177,14 @@ class _InitialRouteState extends State<_InitialRoute> {
     }
 
     // Stored session exists (reconnecting after close / network drop).
-    // Wait until the WebSocket is at least in the 'connecting' or
-    // 'connected' state before showing SyncScreen so we don't render it
-    // while the service is still completely uninitialised (which caused
-    // stream-subscription crashes on cold start after first pairing).
+    // Only show SyncScreen once the WebSocket is fully authenticated
+    // (status == paired). Showing it earlier caused crashes because
+    // SyncScreen subscribes to streams and accesses partner data that
+    // hasn't been restored yet — if auth then fails (PAIR_NOT_FOUND,
+    // INVALID_TOKEN), the session is cleared but SyncScreen is still
+    // mounted and accessing stale/null state.
     if (widget.storage.isPaired) {
-      if (ws.status == ConnectionStatus.disconnected && !ws.isReconnecting) {
-        // Still waiting for the delayed connect — show a loading screen
+      if (ws.status != ConnectionStatus.paired) {
         return const _ReconnectingSplash();
       }
       return const SyncScreen();
