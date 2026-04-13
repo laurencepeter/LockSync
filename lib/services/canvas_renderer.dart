@@ -147,16 +147,16 @@ class CanvasRenderer {
   static void _drawStroke(ui.Canvas canvas, CanvasStroke stroke) {
     if (stroke.points.isEmpty) return;
 
+    // Eraser strokes carry the theme background colour as their stroke
+    // colour, so we can simply paint them normally — BlendMode.clear (the
+    // previous approach) crashes the Android raster thread when used
+    // without a surrounding saveLayer.
     final paint = ui.Paint()
       ..color = ui.Color(stroke.color)
       ..strokeWidth = stroke.thickness
       ..strokeCap = ui.StrokeCap.round
       ..strokeJoin = ui.StrokeJoin.round
       ..style = ui.PaintingStyle.stroke;
-
-    if (stroke.isEraser) {
-      paint.blendMode = ui.BlendMode.clear;
-    }
 
     if (stroke.points.length == 1) {
       canvas.drawCircle(

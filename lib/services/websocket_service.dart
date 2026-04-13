@@ -555,7 +555,16 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  void sendCanvasData(Map<String, dynamic> canvasData, {String? text}) {
+  void sendCanvasData(
+    Map<String, dynamic> canvasData, {
+    String? text,
+    // When true, skip scheduling a local wallpaper re-render. Used by the
+    // live-sync throttle during an active drag stroke — re-rendering a full
+    // 1080x1920+ PNG every 150ms (and shipping it through
+    // WallpaperManager.setBitmap) was OOM'ing paired Android devices.
+    // The wallpaper is still refreshed on stroke-end via a normal call.
+    bool skipWallpaperUpdate = false,
+  }) {
     if (_status != ConnectionStatus.paired) return;
     final payload = {
       'syncType': 'canvas',
@@ -566,8 +575,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       'type': 'sync',
       'payload': payload,
     });
-    // Also trigger auto-wallpaper for our own changes
-    _maybeAutoUpdateWallpaper(canvasData);
+    // Also trigger auto-wallpaper for our own changes (unless the caller is
+    // mid-drag and has asked us to defer until the stroke ends).
+    if (!skipWallpaperUpdate) {
+      _maybeAutoUpdateWallpaper(canvasData);
+    }
   }
 
   void _syncDisplayName() {
