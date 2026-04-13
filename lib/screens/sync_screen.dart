@@ -1350,6 +1350,13 @@ class _WidgetPageCard extends StatelessWidget {
 }
 
 // ─── Canvas preview painter (read-only) ──────────────────────────────
+//
+// NOTE: This painter intentionally avoids BlendMode.clear for eraser strokes.
+// On Android, painting with BlendMode.clear without a surrounding saveLayer
+// crashes the raster thread on many GPU drivers, which is what was taking
+// down both paired devices whenever a partner stroke arrived here. Eraser
+// strokes carry the theme background colour in their [stroke.color] field,
+// so painting them normally produces the same visual result.
 class _CanvasPreviewPainter extends CustomPainter {
   final CanvasState state;
   _CanvasPreviewPainter({required this.state});
@@ -1364,9 +1371,6 @@ class _CanvasPreviewPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
-      if (stroke.isEraser) {
-        paint.blendMode = BlendMode.clear;
-      }
       if (stroke.points.length == 1) {
         canvas.drawCircle(
           stroke.points[0],

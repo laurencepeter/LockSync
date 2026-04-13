@@ -13,6 +13,22 @@ import '../services/websocket_service.dart';
 import '../services/wallpaper_service.dart';
 import '../theme.dart';
 
+// Canvas theme background colours — shared by the screen and the painter so
+// the eraser strokes exactly match the live background (avoids BlendMode.clear
+// which crashes the Android raster thread without a surrounding saveLayer).
+const Map<String, int> _kCanvasThemeColors = {
+  'default':  0xFF0F0F1A,
+  'midnight': 0xFF000000,
+  'rose':     0xFF1A070F,
+  'ocean':    0xFF071422,
+  'forest':   0xFF071A0F,
+  'sunset':   0xFF1A0F07,
+  'lavender': 0xFF130A1A,
+};
+
+int _themeColorInt(String theme) =>
+    _kCanvasThemeColors[theme] ?? 0xFF0F0F1A;
+
 enum CanvasTool { draw, text, eraser, sticker, select }
 
 class CanvasScreen extends StatefulWidget {
@@ -51,18 +67,14 @@ class _CanvasScreenState extends State<CanvasScreen> {
   bool _isDrawing = false;
   Map<String, dynamic>? _pendingPartnerUpdate;
 
-  static const Map<String, int> _canvasThemes = {
-    'default':  0xFF0F0F1A,
-    'midnight': 0xFF000000,
-    'rose':     0xFF1A070F,
-    'ocean':    0xFF071422,
-    'forest':   0xFF071A0F,
-    'sunset':   0xFF1A0F07,
-    'lavender': 0xFF130A1A,
-  };
+  // Number of strokes before the current drag started. Used when merging a
+  // partner update that arrived mid-stroke so we don't wipe strokes the
+  // user just added locally.
+  int _strokeCountAtDragStart = 0;
 
-  Color _getThemeColor() =>
-      Color(_canvasThemes[_canvasState.theme] ?? 0xFF0F0F1A);
+  static const Map<String, int> _canvasThemes = _kCanvasThemeColors;
+
+  Color _getThemeColor() => Color(_themeColorInt(_canvasState.theme));
 
   void _showThemePicker() {
     showModalBottomSheet(
@@ -189,7 +201,14 @@ class _CanvasScreenState extends State<CanvasScreen> {
   }
 
   void _applyPartnerUpdate(Map<String, dynamic> data) {
-    final incoming = CanvasState.fromJson(data);
+    if (!mounted) return;
+    CanvasState incoming;
+    try {
+      incoming = CanvasState.fromJson(data);
+    } catch (_) {
+      // Ignore malformed partner data rather than crashing the UI
+      return;
+    }
     setState(() {
       _canvasState = incoming;
     });
@@ -245,6 +264,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
     if (_currentTool == CanvasTool.draw || _currentTool == CanvasTool.eraser) {
       _pushUndo();
       _isDrawing = true;
+      _strokeCountAtDragStart = _canvasState.strokes.length;
       _currentStrokePoints = [details.localPosition];
     } else if (_currentTool == CanvasTool.select) {
       _tryStartDrag(details.localPosition);
@@ -265,30 +285,48 @@ class _CanvasScreenState extends State<CanvasScreen> {
 
   void _onPanEnd(DragEndDetails details) {
     if (_currentTool == CanvasTool.draw || _currentTool == CanvasTool.eraser) {
-      setState(() {
-        _canvasState.strokes.add(CanvasStroke(
-          points: List.from(_currentStrokePoints),
-          color: _currentTool == CanvasTool.eraser
-              ? 0xFF0F0F1A
-              : _currentColor.toARGB32(),
-          thickness:
-              _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
-          isEraser: _currentTool == CanvasTool.eraser,
-        ));
-        _currentStrokePoints = [];
-      });
+      // Only persist the stroke if we actually recorded any points — tap
+      // gestures can fire onPanStart/onPanEnd without any onPanUpdate.
+      final hasPoints = _currentStrokePoints.isNotEmpty;
+      if (hasPoints) {
+        setState(() {
+          _canvasState.strokes.add(CanvasStroke(
+            points: List.from(_currentStrokePoints),
+            color: _currentTool == CanvasTool.eraser
+                ? _themeColorInt(_canvasState.theme)
+                : _currentColor.toARGB32(),
+            thickness:
+                _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
+            isEraser: _currentTool == CanvasTool.eraser,
+          ));
+          _currentStrokePoints = [];
+        });
+      }
       _isDrawing = false;
       _sendThrottle?.cancel();
+      _sendThrottle = null;
       _saveAndSync();
-      // Apply any queued partner update that arrived mid-stroke
+      // Apply any queued partner update that arrived mid-stroke, merging
+      // our just-added strokes on top so they aren't wiped.
       if (_pendingPartnerUpdate != null) {
         final pending = _pendingPartnerUpdate!;
         _pendingPartnerUpdate = null;
-        // Apply partner's update then re-sync so both sides converge
+        final localStrokesAdded = _canvasState.strokes
+            .skip(_strokeCountAtDragStart)
+            .toList(growable: false);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _applyPartnerUpdate(pending);
+          if (!mounted) return;
+          try {
+            final incoming = CanvasState.fromJson(pending);
+            // Re-append any strokes we added locally during the drag so
+            // the partner's snapshot doesn't overwrite them.
+            incoming.strokes.addAll(localStrokesAdded);
+            setState(() {
+              _canvasState = incoming;
+            });
             _saveAndSync();
+          } catch (_) {
+            // Malformed pending update — drop it rather than crash.
           }
         });
       }
@@ -302,13 +340,14 @@ class _CanvasScreenState extends State<CanvasScreen> {
   void _throttledSync() {
     if (_sendThrottle?.isActive ?? false) return;
     _sendThrottle = Timer(const Duration(milliseconds: 150), () {
+      if (!mounted) return;
       // Build a temporary state that includes the in-progress stroke
       final tempState = CanvasState.fromJson(_canvasState.toJson());
       if (_currentStrokePoints.isNotEmpty) {
         tempState.strokes.add(CanvasStroke(
           points: List.from(_currentStrokePoints),
           color: _currentTool == CanvasTool.eraser
-              ? 0xFF0F0F1A
+              ? _themeColorInt(_canvasState.theme)
               : _currentColor.toARGB32(),
           thickness:
               _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
@@ -316,7 +355,10 @@ class _CanvasScreenState extends State<CanvasScreen> {
         ));
       }
       final ws = context.read<WebSocketService>();
-      ws.sendCanvasData(tempState.toJson());
+      // `skipWallpaperUpdate` avoids scheduling a 1080x1920+ PNG render on
+      // every 150ms throttle tick — wallpaper is updated once the stroke
+      // completes (via `_saveAndSync` in `_onPanEnd`).
+      ws.sendCanvasData(tempState.toJson(), skipWallpaperUpdate: true);
     });
   }
 
@@ -786,7 +828,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
                             strokes: _canvasState.strokes,
                             currentStroke: _currentStrokePoints,
                             currentColor: _currentTool == CanvasTool.eraser
-                                ? const Color(0xFF0F0F1A)
+                                ? Color(_themeColorInt(_canvasState.theme))
                                 : _currentColor,
                             currentThickness: _currentTool == CanvasTool.eraser
                                 ? 20.0
@@ -1059,17 +1101,32 @@ class _CanvasPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     for (final stroke in strokes) {
-      _drawStroke(canvas, stroke.points, Color(stroke.color), stroke.thickness,
-          stroke.isEraser);
+      _drawStroke(
+        canvas,
+        stroke.points,
+        Color(stroke.color),
+        stroke.thickness,
+      );
     }
 
     if (currentStroke.isNotEmpty) {
-      _drawStroke(canvas, currentStroke, currentColor, currentThickness, false);
+      _drawStroke(canvas, currentStroke, currentColor, currentThickness);
     }
   }
 
-  void _drawStroke(Canvas canvas, List<Offset> points, Color color,
-      double thickness, bool isEraser) {
+  // NOTE: The previous implementation used [BlendMode.clear] for eraser
+  // strokes. Painting with BlendMode.clear on Flutter's default raster layer
+  // (no surrounding saveLayer) is known to crash the Android raster thread
+  // on several hardware-accelerated GPU drivers — which is what was taking
+  // both paired devices down whenever a stroke was drawn. The eraser now
+  // simply paints with the canvas theme's background colour, visually
+  // matching the clear operation without ever touching BlendMode.clear.
+  void _drawStroke(
+    Canvas canvas,
+    List<Offset> points,
+    Color color,
+    double thickness,
+  ) {
     if (points.isEmpty) return;
 
     final paint = Paint()
@@ -1079,12 +1136,12 @@ class _CanvasPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
-    if (isEraser) {
-      paint.blendMode = BlendMode.clear;
-    }
-
     if (points.length == 1) {
-      canvas.drawCircle(points[0], thickness / 2, paint..style = PaintingStyle.fill);
+      canvas.drawCircle(
+        points[0],
+        thickness / 2,
+        paint..style = PaintingStyle.fill,
+      );
       return;
     }
 
