@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'canvas_renderer.dart';
+import 'crash_logger.dart';
 import 'lock_screen_service.dart';
 import 'storage_service.dart';
 import 'wallpaper_service.dart';
@@ -96,65 +97,78 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   void _listenToBackgroundService() {
     _bgServiceSub = LockScreenService.onMessage.listen((msg) {
       if (_disposed) return;
-      final payload = msg['payload'] as Map<String, dynamic>?;
-      if (payload == null) return;
-      final syncType = payload['syncType'] as String?;
-
-      switch (syncType) {
-        case 'canvas':
-          final canvasData = payload['canvasData'] as Map<String, dynamic>?;
-          if (canvasData != null) {
-            _partnerCanvasData = canvasData;
-            _partnerText = (payload['text'] as String?) ?? _partnerText;
-            storage.setCanvasState(jsonEncode(canvasData));
-            _canvasSyncController.add(canvasData);
-            notifyListeners();
-            _maybeAutoUpdateWallpaper(canvasData);
-          }
-          break;
-        case 'grocery':
-          final gi = payload['items'];
-          if (gi is List) {
-            storage.setGroceryList(List<Map<String, dynamic>>.from(gi));
-          }
-          _widgetSyncController.add(payload);
-          notifyListeners();
-          break;
-        case 'watchlist':
-          final wi = payload['items'];
-          if (wi is List) {
-            storage.setWatchlist(List<Map<String, dynamic>>.from(wi));
-          }
-          _widgetSyncController.add(payload);
-          notifyListeners();
-          break;
-        case 'reminder':
-          final ri = payload['items'];
-          if (ri is List) {
-            storage.setReminders(List<Map<String, dynamic>>.from(ri));
-          }
-          _widgetSyncController.add(payload);
-          notifyListeners();
-          break;
-        case 'countdown':
-          final ci = payload['items'];
-          if (ci is List) {
-            storage.setCountdowns(List<Map<String, dynamic>>.from(ci));
-          }
-          _widgetSyncController.add(payload);
-          notifyListeners();
-          break;
-        case 'moment':
-          // Received a moment from partner — persist and forward to UI.
-          final momentData = Map<String, dynamic>.from(payload);
-          final existing = storage.getMoments();
-          existing.insert(0, momentData);
-          storage.setMoments(existing);
-          _widgetSyncController.add(payload);
-          notifyListeners();
-          break;
+      try {
+        _handleBackgroundMessage(msg);
+      } catch (e, st) {
+        CrashLogger.record(
+          source: 'bg-relay',
+          error: e,
+          stack: st,
+          context: '_listenToBackgroundService',
+        );
       }
     });
+  }
+
+  void _handleBackgroundMessage(Map<String, dynamic> msg) {
+    final payload = msg['payload'] as Map<String, dynamic>?;
+    if (payload == null) return;
+    final syncType = payload['syncType'] as String?;
+
+    switch (syncType) {
+      case 'canvas':
+        final canvasData = payload['canvasData'] as Map<String, dynamic>?;
+        if (canvasData != null) {
+          _partnerCanvasData = canvasData;
+          _partnerText = (payload['text'] as String?) ?? _partnerText;
+          storage.setCanvasState(jsonEncode(canvasData));
+          _canvasSyncController.add(canvasData);
+          notifyListeners();
+          _maybeAutoUpdateWallpaper(canvasData);
+        }
+        break;
+      case 'grocery':
+        final gi = payload['items'];
+        if (gi is List) {
+          storage.setGroceryList(List<Map<String, dynamic>>.from(gi));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+      case 'watchlist':
+        final wi = payload['items'];
+        if (wi is List) {
+          storage.setWatchlist(List<Map<String, dynamic>>.from(wi));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+      case 'reminder':
+        final ri = payload['items'];
+        if (ri is List) {
+          storage.setReminders(List<Map<String, dynamic>>.from(ri));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+      case 'countdown':
+        final ci = payload['items'];
+        if (ci is List) {
+          storage.setCountdowns(List<Map<String, dynamic>>.from(ci));
+        }
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+      case 'moment':
+        // Received a moment from partner — persist and forward to UI.
+        final momentData = Map<String, dynamic>.from(payload);
+        final existing = storage.getMoments();
+        existing.insert(0, momentData);
+        storage.setMoments(existing);
+        _widgetSyncController.add(payload);
+        notifyListeners();
+        break;
+    }
   }
 
   @override
@@ -281,7 +295,34 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
 
   void _onMessage(dynamic raw) {
     if (_disposed) return;
-    final msg = jsonDecode(raw as String) as Map<String, dynamic>;
+    // Wrap the entire dispatch so a malformed message or an unexpected
+    // exception in one of the handlers can't tear down the isolate — the
+    // crash is recorded and we simply drop the message.
+    try {
+      final Map<String, dynamic> msg;
+      try {
+        msg = jsonDecode(raw as String) as Map<String, dynamic>;
+      } catch (e, st) {
+        CrashLogger.record(
+          source: 'ws',
+          error: e,
+          stack: st,
+          context: 'Failed to decode WebSocket message',
+        );
+        return;
+      }
+      _dispatchMessage(msg);
+    } catch (e, st) {
+      CrashLogger.record(
+        source: 'ws',
+        error: e,
+        stack: st,
+        context: '_onMessage',
+      );
+    }
+  }
+
+  void _dispatchMessage(Map<String, dynamic> msg) {
     final type = msg['type'] as String?;
 
     switch (type) {

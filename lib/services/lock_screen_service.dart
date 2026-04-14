@@ -356,6 +356,24 @@ class _BgServiceRunner {
 
   // ── Connect WebSocket and start relaying ──
   Future<void> connect() async {
+    // Refuse to connect if the service has been paused (main app is in
+    // foreground) — calling this from a stale reconnect timer would create
+    // the dual-WS race the pause handler is trying to prevent.
+    if (!active) return;
+
+    // Tear down any lingering channel/subscription before opening a new one
+    // so we never end up holding two WebSockets at once.
+    try {
+      await wsSub?.cancel();
+    } catch (_) {}
+    wsSub = null;
+    try {
+      await channel?.sink.close();
+    } catch (_) {}
+    channel = null;
+    pingTimer?.cancel();
+    pingTimer = null;
+
     final prefs = await SharedPreferences.getInstance();
     final serverUrl = prefs.getString('bg_server_url');
     final accessToken = prefs.getString('bg_access_token');
@@ -366,6 +384,16 @@ class _BgServiceRunner {
     try {
       channel = WebSocketChannel.connect(Uri.parse(serverUrl));
       await channel!.ready;
+      // If pause fired while we were awaiting `ready`, abort — we should not
+      // start listening or pinging because the main isolate is now the
+      // authoritative connection.
+      if (!active) {
+        try {
+          await channel?.sink.close();
+        } catch (_) {}
+        channel = null;
+        return;
+      }
 
       // Authenticate immediately
       channel!.sink.add(jsonEncode({
@@ -610,21 +638,32 @@ class _BgServiceRunner {
     // ── Pause WS while the main app is in the foreground ──
     // Prevents dual-connection conflicts that cause the main isolate to
     // get kicked off the server when the user is editing the canvas.
+    //
+    // CRITICAL: We flip `active` to false here so that if the underlying
+    // WebSocket is torn down racily (onDone/onError firing *before* the
+    // cancel below has been awaited), the stray `scheduleReconnect` call
+    // won't re-open a second connection behind the main isolate's back.
+    // `_kInvokeResume` sets active=true again when the app backgrounds.
     service.on(_kInvokePause).listen((_) async {
+      active = false;
       reconnectTimer?.cancel();
       reconnectTimer = null;
       pingTimer?.cancel();
-      await wsSub?.cancel();
-      await channel?.sink.close();
+      try {
+        await wsSub?.cancel();
+      } catch (_) {}
+      wsSub = null;
+      try {
+        await channel?.sink.close();
+      } catch (_) {}
       channel = null;
     });
 
     // ── Resume WS when the app goes back to the background ──
     service.on(_kInvokeResume).listen((_) async {
-      if (active) {
-        reconnectAttempts = 0;
-        connect();
-      }
+      active = true;
+      reconnectAttempts = 0;
+      connect();
     });
 
     // Do NOT auto-connect here. The service starts while the app is still in

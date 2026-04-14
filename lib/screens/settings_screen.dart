@@ -2,11 +2,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../services/crash_logger.dart';
 import '../services/websocket_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'customization_screen.dart';
 import 'developer_screen.dart';
+import 'diagnostics_screen.dart';
 import 'display_name_screen.dart';
 import 'memory_wall_screen.dart';
 
@@ -21,6 +23,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Hidden developer menu: tap the "Settings" title 5 times → PIN dialog.
   int _titleTapCount = 0;
   DateTime? _lastTitleTap;
+
+  // Whether any crashes have been recorded — drives a small warning dot in
+  // the Diagnostics tile so the user knows to check it.
+  bool _hasCrashLog = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkCrashLog();
+  }
+
+  Future<void> _checkCrashLog() async {
+    final any = await CrashLogger.hasAny();
+    if (!mounted) return;
+    if (any != _hasCrashLog) setState(() => _hasCrashLog = any);
+  }
 
   void _onTitleTap() {
     final now = DateTime.now();
@@ -297,6 +315,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onSelect: (theme) {
                         storage.setActiveTheme(theme);
                         setState(() {});
+                      },
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Diagnostics section — surfaces captured crashes so the
+                    // user can copy the stack trace and share it.
+                    const _SectionHeader(title: 'DIAGNOSTICS'),
+                    _SettingsTile(
+                      icon: Icons.bug_report_rounded,
+                      title: 'Crash Log',
+                      subtitle: _hasCrashLog
+                          ? 'A crash was recorded — tap to view'
+                          : 'No crashes recorded',
+                      trailing: _hasCrashLog
+                          ? Container(
+                              width: 10,
+                              height: 10,
+                              decoration: const BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                          : null,
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const DiagnosticsScreen()),
+                        );
+                        // Re-check after returning — user may have cleared
+                        _checkCrashLog();
                       },
                     ),
 
