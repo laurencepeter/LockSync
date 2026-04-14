@@ -74,8 +74,8 @@
              engine — this allows the lock screen wallpaper to update even
              when the app is fully closed. -->
         <service
-            android:name="com.locksync.app.LockSyncBackgroundService"
-            android:foregroundServiceType="dataSync"
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="dataSync|connectedDevice"
             android:exported="false"
             tools:replace="android:exported"/>
 

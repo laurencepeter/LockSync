@@ -157,7 +157,7 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
                     if (_changed)
                       TextButton(
                         onPressed: _save,
-                        child: Text('Save',
+                        child: const Text('Save',
                             style: TextStyle(
                                 color: LockSyncTheme.primaryColor,
                                 fontWeight: FontWeight.w700)),
@@ -175,7 +175,7 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
                     const SizedBox(height: 8),
 
                     // ── Colors ────────────────────────────────────────────
-                    _SectionHeader('COLORS'),
+                    const _SectionHeader('COLORS'),
 
                     _ColorTile(
                       label: 'Primary Color',
@@ -195,7 +195,7 @@ class _CustomizationScreenState extends State<CustomizationScreen> {
                     const SizedBox(height: 24),
 
                     // ── Font ─────────────────────────────────────────────
-                    _SectionHeader('FONT'),
+                    const _SectionHeader('FONT'),
 
                     ..._kAvailableFonts.map((font) {
                       final selected = _font == font;

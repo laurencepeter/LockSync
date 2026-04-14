@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/websocket_service.dart';
-import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'pairing_screen.dart';
 

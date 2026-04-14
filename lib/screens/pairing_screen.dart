@@ -61,15 +61,7 @@ class _PairingScreenState extends State<PairingScreen>
       }
       setState(() {
         _secondsLeft--;
-        if (_secondsLeft <= 0) {
-          t.cancel();
-          // Auto-regenerate so the user never has to manually refresh the code
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && !_navigated) {
-              _generateCode(context.read<WebSocketService>());
-            }
-          });
-        }
+        if (_secondsLeft <= 0) t.cancel();
       });
     });
   }
@@ -108,8 +100,6 @@ class _PairingScreenState extends State<PairingScreen>
   void _navigateToDisplayName() {
     if (_navigated) return;
     _navigated = true;
-    _expiryTimer?.cancel();
-    _expiryTimer = null;
     Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const DisplayNameScreen(isInitialSetup: true),
@@ -138,18 +128,6 @@ class _PairingScreenState extends State<PairingScreen>
     if (ws.status == ConnectionStatus.paired && !_navigated) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _navigateToDisplayName());
-    }
-
-    // Auto-regenerate when the server signals the code expired (e.g. after a
-    // reconnect where the client and server clocks are slightly out of sync)
-    if (ws.errorMessage == 'Pairing code expired. Generate a new one.' &&
-        !_navigated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_navigated) {
-          ws.clearError();
-          _generateCode(ws);
-        }
-      });
     }
 
     return Scaffold(
@@ -571,7 +549,7 @@ class _AnimatedCodeDisplay extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final totalGap = 8.0 * 4 + 16.0;
+          const totalGap = 8.0 * 4 + 16.0;
           final digitWidth =
               ((constraints.maxWidth - totalGap) / 6).clamp(36.0, 48.0);
           final digitHeight = digitWidth * 1.27;
