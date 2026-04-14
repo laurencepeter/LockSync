@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/crash_logger.dart';
+import '../services/wallpaper_service.dart';
 import '../services/websocket_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
@@ -28,10 +29,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // the Diagnostics tile so the user knows to check it.
   bool _hasCrashLog = false;
 
+  // Tracks whether battery optimisation is already disabled for this app.
+  bool _batteryOptExempt = true;
+
   @override
   void initState() {
     super.initState();
     _checkCrashLog();
+    _checkBatteryOpt();
+  }
+
+  Future<void> _checkBatteryOpt() async {
+    final exempt = await WallpaperService.isBatteryOptimizationExempt();
+    if (!mounted) return;
+    if (exempt != _batteryOptExempt) setState(() => _batteryOptExempt = exempt);
   }
 
   Future<void> _checkCrashLog() async {
@@ -246,6 +257,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           storage.setAutoUpdateWallpaper(v);
                           setState(() {});
                         },
+                      ),
+                    if (Platform.isAndroid)
+                      _SettingsTile(
+                        icon: Icons.battery_saver_rounded,
+                        title: 'Battery Optimization',
+                        subtitle: _batteryOptExempt
+                            ? 'Disabled — service stays alive'
+                            : 'Enabled — may kill background service',
+                        trailing: _batteryOptExempt
+                            ? null
+                            : Container(
+                                width: 10,
+                                height: 10,
+                                decoration: const BoxDecoration(
+                                  color: Colors.orangeAccent,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                        onTap: _batteryOptExempt
+                            ? null
+                            : () async {
+                                await WallpaperService
+                                    .requestBatteryOptimizationExemption();
+                                // Re-check after returning from settings
+                                await _checkBatteryOpt();
+                              },
                       ),
                     if (Platform.isIOS)
                       _SettingsTile(

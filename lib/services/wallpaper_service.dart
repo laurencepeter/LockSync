@@ -216,6 +216,29 @@ class WallpaperService {
     } catch (_) {}
   }
 
+  // ── Battery optimisation ──────────────────────────────────────────────────
+
+  /// Returns true if the app is already exempt from Android battery
+  /// optimisations (Doze whitelist).  Always returns true on iOS / pre-M.
+  static Future<bool> isBatteryOptimizationExempt() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _channel.invokeMethod('checkBatteryOptimization') as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Open the system dialog / settings page that lets the user exempt this
+  /// app from battery optimisations.  Call this when the user taps
+  /// "Disable Battery Optimization" in the Settings screen.
+  static Future<void> requestBatteryOptimizationExemption() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestBatteryOptimizationExemption');
+    } catch (_) {}
+  }
+
   /// Save the latest canvas image to gallery (for iOS "refresh & save")
   static Future<void> saveToGallery(
     Uint8List imageBytes, {

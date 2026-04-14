@@ -672,6 +672,23 @@ class _BgServiceRunner {
     // (fired by WebSocketService._handleAppBackgrounded) triggers the actual
     // connection once the app moves to the background.
     active = false; // will be set true by _kInvokeStart
+
+    // ── Keep-alive heartbeat ─────────────────────────────────────────────────
+    // Fires every 5 s to prevent aggressive battery managers (Huawei, Xiaomi,
+    // Samsung "Sleeping apps") from marking the isolate as idle and killing it.
+    // The timer itself has no network cost — it just keeps the Dart event loop
+    // spinning so the OS sees the process as active.
+    Timer.periodic(const Duration(seconds: 5), (_) {
+      // If the service has been stopped, the isolate is about to be torn down
+      // anyway, so we can safely no-op here.
+      if (service is AndroidServiceInstance) {
+        // Keeping the event loop warm is all we need — no log spam in release.
+        assert(() {
+          debugPrint('[BG] Service alive…');
+          return true;
+        }());
+      }
+    });
   }
 }
 
