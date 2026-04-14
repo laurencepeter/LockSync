@@ -3,6 +3,9 @@
 /// Exposes the full pairing UI so a developer / power user can pair with a
 /// different device without going through the welcome flow.  Pairing from
 /// here replaces the existing pair session (same as joining on first launch).
+///
+/// Also contains dev-only toggles (e.g. disabling screenshot blocking) that
+/// must NOT appear in the regular Settings screen.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,8 +15,28 @@ import '../services/websocket_service.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'pairing_screen.dart';
 
-class DeveloperScreen extends StatelessWidget {
+class DeveloperScreen extends StatefulWidget {
   const DeveloperScreen({super.key});
+
+  @override
+  State<DeveloperScreen> createState() => _DeveloperScreenState();
+}
+
+class _DeveloperScreenState extends State<DeveloperScreen> {
+  bool _screenshotDevMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final storage = context.read<WebSocketService>().storage;
+    _screenshotDevMode = storage.screenshotDevMode;
+  }
+
+  Future<void> _toggleScreenshotDevMode(bool value) async {
+    final storage = context.read<WebSocketService>().storage;
+    await storage.setScreenshotDevMode(value);
+    setState(() => _screenshotDevMode = value);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +134,46 @@ class DeveloperScreen extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              // Dev-only settings
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(16),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                  ),
+                  child: SwitchListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    secondary: Icon(
+                      Icons.screenshot_monitor_rounded,
+                      color: _screenshotDevMode
+                          ? Colors.orange
+                          : Colors.white38,
+                      size: 22,
+                    ),
+                    title: const Text(
+                      'Allow Screenshots in Moments',
+                      style: TextStyle(color: Colors.white, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      _screenshotDevMode
+                          ? 'Screenshot blocking disabled'
+                          : 'Screenshots blocked (default)',
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12),
+                    ),
+                    value: _screenshotDevMode,
+                    onChanged: _toggleScreenshotDevMode,
+                    activeColor: Colors.orange,
+                  ),
                 ),
               ),
 

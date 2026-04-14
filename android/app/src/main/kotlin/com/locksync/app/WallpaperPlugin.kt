@@ -75,6 +75,7 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
             "requestOverlayPermission"        -> handleRequestOverlayPermission(result)
             "checkFullScreenIntentPermission" -> handleCheckFullScreenIntentPermission(result)
             "requestFullScreenIntentPermission" -> handleRequestFullScreenIntentPermission(result)
+            "setSecureFlag"                   -> handleSetSecureFlag(call, result)
             else                              -> result.notImplemented()
         }
     }
@@ -228,6 +229,25 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
             "width" to metrics.widthPixels,
             "height" to metrics.heightPixels
         ))
+    }
+
+    /**
+     * Add or remove FLAG_SECURE on the activity window so that the OS
+     * prevents screenshots and screen recording while the flag is set.
+     */
+    private fun handleSetSecureFlag(call: MethodCall, result: MethodChannel.Result) {
+        val secure = call.argument<Boolean>("secure") ?: false
+        val activity = activityBinding?.activity ?: run { result.success(false); return }
+        try {
+            if (secure) {
+                activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("SECURE_FLAG_ERROR", e.message, null)
+        }
     }
 
     private fun handleShowOnLockScreen(call: MethodCall, result: MethodChannel.Result) {
