@@ -5,9 +5,11 @@ import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../config/app_config.dart';
 import 'canvas_renderer.dart';
 import 'crash_logger.dart';
 import 'lock_screen_service.dart';
+import 'server_health.dart';
 import 'storage_service.dart';
 import 'wallpaper_service.dart';
 
@@ -16,10 +18,8 @@ enum ConnectionStatus { disconnected, connecting, connected, paired }
 class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   final StorageService storage;
 
-  static const String _wsUrl = String.fromEnvironment(
-    'WS_URL',
-    defaultValue: 'wss://locksync.fireydev.com',
-  );
+  /// The relay server WebSocket URL — single source of truth is [AppConfig.wsUrl].
+  static String get _wsUrl => AppConfig.wsUrl;
 
   WebSocketChannel? _channel;
   ConnectionStatus _status = ConnectionStatus.disconnected;
@@ -51,6 +51,10 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   // Tracks whether this service has been disposed so async callbacks
   // (timers, stream events) don't fire on closed controllers.
   bool _disposed = false;
+
+  // Last known server reachability from the /health endpoint.
+  // null = not yet checked, true = healthy, false = unreachable.
+  bool? _serverHealthy;
 
   // Foreground tracking — used to skip expensive canvas renders while the
   // app is in background (the background-service isolate handles those).
@@ -86,6 +90,9 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   String? get partnerMood => _partnerMood;
   bool get isReconnecting => _isReconnecting;
   Map<String, dynamic>? get partnerCanvasData => _partnerCanvasData;
+  /// Last known result of a GET [AppConfig.healthUrl] check.
+  /// `null` until the first check completes.
+  bool? get serverHealthy => _serverHealthy;
 
   WebSocketService({required this.storage}) {
     WidgetsBinding.instance.addObserver(this);
@@ -278,6 +285,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         },
       );
       _status = ConnectionStatus.connected;
+      _serverHealthy = true; // We just connected — server is clearly up
       _reconnectAttempts = 0;
       _startPing();
       notifyListeners();
@@ -746,20 +754,44 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     if (_status == ConnectionStatus.disconnected) return;
     _status = ConnectionStatus.disconnected;
     _partnerOnline = false;
-    // Show reconnecting banner in SyncScreen while we attempt to restore
-    if (storage.isPaired) {
-      _isReconnecting = true;
-    }
+    if (storage.isPaired) _isReconnecting = true;
     notifyListeners();
 
-    final delay = Duration(seconds: (1 << _reconnectAttempts).clamp(1, 30));
+    // Fire the health check asynchronously so we can tune the backoff without
+    // blocking the UI thread.  The reconnect timer is started inside the
+    // callback once we know whether the server is reachable.
+    _scheduleReconnectWithHealthCheck();
+  }
+
+  /// Pings [AppConfig.healthUrl], then schedules the reconnect timer with a
+  /// delay appropriate to the result:
+  ///   • Server healthy → normal exponential backoff (1 s – 30 s)
+  ///   • Server down    → fixed 30 s delay + visible error message
+  Future<void> _scheduleReconnectWithHealthCheck() async {
+    if (_disposed) return;
+
+    final healthy = await ServerHealth.check();
+    if (_disposed) return;
+
+    _serverHealthy = healthy;
+
+    if (!healthy) {
+      // Only overwrite the error when there isn't already a more specific one
+      // (e.g. PAIR_NOT_FOUND set by the server before the drop).
+      _errorMessage ??= 'Server unreachable — retrying in 30 s';
+      notifyListeners();
+    }
+
+    // Determine delay: use normal backoff when healthy, 30 s flat when down.
+    final delaySec = healthy
+        ? (1 << _reconnectAttempts).clamp(1, 30)
+        : 30;
     if (_reconnectAttempts < 5) _reconnectAttempts++;
+
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(delay, () {
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () {
       _reconnectTimer = null;
-      if (!_disposed && _status == ConnectionStatus.disconnected) {
-        connect();
-      }
+      if (!_disposed && _status == ConnectionStatus.disconnected) connect();
     });
   }
 

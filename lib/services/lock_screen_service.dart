@@ -10,7 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../config/app_config.dart';
 import 'canvas_renderer.dart';
+import 'server_health.dart';
 import 'wallpaper_service.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -380,6 +382,18 @@ class _BgServiceRunner {
     final deviceId = prefs.getString('bg_device_id');
 
     if (serverUrl == null || accessToken == null || deviceId == null) return;
+
+    // ── Health check before opening the WebSocket ─────────────────────────
+    // Avoids burning reconnect attempts when the server is known-down.
+    // Uses AppConfig.healthUrl (derived from the compiled-in WS URL) which
+    // is consistent with the stored serverUrl for the default server.
+    final serverUp = await ServerHealth.check();
+    if (!active) return; // pause may have fired during the health check
+    if (!serverUp) {
+      debugPrint('[BG] Health check failed — server unreachable, deferring reconnect');
+      scheduleReconnect(); // try again after the normal backoff
+      return;
+    }
 
     try {
       channel = WebSocketChannel.connect(Uri.parse(serverUrl));
