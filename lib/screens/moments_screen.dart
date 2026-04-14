@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -348,10 +349,15 @@ class _MomentCardState extends State<_MomentCard> {
   }
 
   Future<void> _openViewer() async {
+    final devMode =
+        context.read<WebSocketService>().storage.screenshotDevMode;
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MomentViewerScreen(moment: widget.moment),
+        builder: (_) => MomentViewerScreen(
+          moment: widget.moment,
+          screenshotDevMode: devMode,
+        ),
       ),
     );
     widget.onViewed();
@@ -632,13 +638,23 @@ class _BrokenMedia extends StatelessWidget {
 
 class MomentViewerScreen extends StatefulWidget {
   final Moment moment;
-  const MomentViewerScreen({super.key, required this.moment});
+  /// When true (dev mode), FLAG_SECURE is not applied so screenshots are
+  /// allowed. Toggled from the hidden Developer screen only.
+  final bool screenshotDevMode;
+
+  const MomentViewerScreen({
+    super.key,
+    required this.moment,
+    this.screenshotDevMode = false,
+  });
 
   @override
   State<MomentViewerScreen> createState() => _MomentViewerScreenState();
 }
 
 class _MomentViewerScreenState extends State<MomentViewerScreen> {
+  static const _channel = MethodChannel('com.locksync/wallpaper');
+
   Timer? _timer;
   late int _remaining;
   VideoPlayerController? _videoController;
@@ -661,6 +677,9 @@ class _MomentViewerScreenState extends State<MomentViewerScreen> {
     _remaining = widget.moment.viewDuration;
     if (widget.moment.isVideo) {
       _initVideo();
+    }
+    if (Platform.isAndroid && !widget.screenshotDevMode) {
+      _channel.invokeMethod('setSecureFlag', {'secure': true});
     }
   }
 
@@ -696,6 +715,9 @@ class _MomentViewerScreenState extends State<MomentViewerScreen> {
     _timer?.cancel();
     _videoController?.dispose();
     _videoFile?.deleteSync();
+    if (Platform.isAndroid) {
+      _channel.invokeMethod('setSecureFlag', {'secure': false});
+    }
     super.dispose();
   }
 

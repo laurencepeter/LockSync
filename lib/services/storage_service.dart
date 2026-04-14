@@ -28,6 +28,7 @@ class StorageService {
   static const _keyReminders = 'locksync_reminders';
   static const _keyCountdowns = 'locksync_countdowns';
   static const _keyMoments = 'locksync_moments';
+  static const _keyScreenshotDevMode = 'locksync_screenshot_dev_mode';
 
   late SharedPreferences _prefs;
 
@@ -215,6 +216,14 @@ class StorageService {
 
   Future<void> setCountdowns(List<Map<String, dynamic>> list) async {
     await _prefs.setString(_keyCountdowns, jsonEncode(list));
+  }
+
+  // Screenshot blocking dev mode — disables FLAG_SECURE on the Moment viewer.
+  // Only exposed in the hidden Developer screen, never shown in Settings.
+  bool get screenshotDevMode =>
+      _prefs.getBool(_keyScreenshotDevMode) ?? false;
+  Future<void> setScreenshotDevMode(bool value) async {
+    await _prefs.setBool(_keyScreenshotDevMode, value);
   }
 
   // Moments (received image/video moments with view-count tracking)
