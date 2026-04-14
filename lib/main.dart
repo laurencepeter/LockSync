@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'config/app_config.dart';
 import 'services/canvas_renderer.dart';
 import 'services/crash_logger.dart';
 import 'services/storage_service.dart';
@@ -205,10 +206,7 @@ class _InitialRouteState extends State<_InitialRoute> {
       // a dangling foreground-service notification with stale credentials.
       if (!mounted) return;
       await LockScreenService.start(
-        serverUrl: const String.fromEnvironment(
-          'WS_URL',
-          defaultValue: 'wss://locksync.fireydev.com',
-        ),
+        serverUrl: AppConfig.wsUrl,
         accessToken: s.accessToken!,
         refreshToken: s.refreshToken ?? '',
         deviceId: s.getDeviceId(),

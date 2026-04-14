@@ -10,7 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../config/app_config.dart';
 import 'canvas_renderer.dart';
+import 'server_health.dart';
 import 'wallpaper_service.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -381,6 +383,18 @@ class _BgServiceRunner {
 
     if (serverUrl == null || accessToken == null || deviceId == null) return;
 
+    // ── Health check before opening the WebSocket ─────────────────────────
+    // Avoids burning reconnect attempts when the server is known-down.
+    // Uses AppConfig.healthUrl (derived from the compiled-in WS URL) which
+    // is consistent with the stored serverUrl for the default server.
+    final serverUp = await ServerHealth.check();
+    if (!active) return; // pause may have fired during the health check
+    if (!serverUp) {
+      debugPrint('[BG] Health check failed — server unreachable, deferring reconnect');
+      scheduleReconnect(); // try again after the normal backoff
+      return;
+    }
+
     try {
       channel = WebSocketChannel.connect(Uri.parse(serverUrl));
       await channel!.ready;
@@ -672,6 +686,23 @@ class _BgServiceRunner {
     // (fired by WebSocketService._handleAppBackgrounded) triggers the actual
     // connection once the app moves to the background.
     active = false; // will be set true by _kInvokeStart
+
+    // ── Keep-alive heartbeat ─────────────────────────────────────────────────
+    // Fires every 5 s to prevent aggressive battery managers (Huawei, Xiaomi,
+    // Samsung "Sleeping apps") from marking the isolate as idle and killing it.
+    // The timer itself has no network cost — it just keeps the Dart event loop
+    // spinning so the OS sees the process as active.
+    Timer.periodic(const Duration(seconds: 5), (_) {
+      // If the service has been stopped, the isolate is about to be torn down
+      // anyway, so we can safely no-op here.
+      if (service is AndroidServiceInstance) {
+        // Keeping the event loop warm is all we need — no log spam in release.
+        assert(() {
+          debugPrint('[BG] Service alive…');
+          return true;
+        }());
+      }
+    });
   }
 }
 

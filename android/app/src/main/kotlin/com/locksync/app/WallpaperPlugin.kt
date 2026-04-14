@@ -9,6 +9,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.WindowManager
@@ -76,6 +77,8 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
             "checkFullScreenIntentPermission" -> handleCheckFullScreenIntentPermission(result)
             "requestFullScreenIntentPermission" -> handleRequestFullScreenIntentPermission(result)
             "setSecureFlag"                   -> handleSetSecureFlag(call, result)
+            "checkBatteryOptimization"        -> handleCheckBatteryOptimization(result)
+            "requestBatteryOptimizationExemption" -> handleRequestBatteryOptimizationExemption(result)
             else                              -> result.notImplemented()
         }
     }
@@ -285,6 +288,59 @@ class WallpaperPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
             result.success(true)
         } catch (e: Exception) {
             result.error("LOCK_SCREEN_ERROR", e.message, null)
+        }
+    }
+
+    // ── Battery optimisation ─────────────────────────────────────────────────
+
+    /**
+     * Returns true if the app is already exempt from battery optimisations
+     * (i.e. on the "unrestricted" whitelist), false otherwise.
+     */
+    private fun handleCheckBatteryOptimization(result: MethodChannel.Result) {
+        val ctx = appContext ?: run { result.success(false); return }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as PowerManager
+            result.success(pm.isIgnoringBatteryOptimizations(ctx.packageName))
+        } else {
+            // Pre-Marshmallow: Doze doesn't exist, treat as exempt.
+            result.success(true)
+        }
+    }
+
+    /**
+     * Open the system Settings page where the user can exempt this app from
+     * battery optimisations (the "Unrestricted" / "Don't optimise" option).
+     *
+     * On Android 6+ we try the direct per-app page first; on Android 12+ the
+     * direct ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS intent requires the
+     * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission in the manifest (already
+     * present in LockSync's manifest).  We fall back to the generic battery
+     * optimisation list if the direct page isn't available.
+     */
+    private fun handleRequestBatteryOptimizationExemption(result: MethodChannel.Result) {
+        val ctx = appContext ?: run { result.success(false); return }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:${ctx.packageName}")
+            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            try {
+                ctx.startActivity(intent)
+                result.success(true)
+            } catch (_: Exception) {
+                // Fallback: open the general battery optimisation list
+                val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    .apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                try {
+                    ctx.startActivity(fallback)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("BATTERY_OPT_ERROR", e.message, null)
+                }
+            }
+        } else {
+            result.success(true) // No Doze on pre-Marshmallow
         }
     }
 

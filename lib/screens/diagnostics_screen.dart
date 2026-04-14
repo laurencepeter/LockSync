@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config/app_config.dart';
 import '../services/crash_logger.dart';
+import '../services/server_health.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 
@@ -18,10 +20,26 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   List<CrashEntry> _entries = const [];
   bool _loading = true;
 
+  // null = checking, true = healthy, false = unreachable
+  bool? _serverHealthy;
+  bool _serverChecking = false;
+
   @override
   void initState() {
     super.initState();
     _refresh();
+    _checkServer();
+  }
+
+  Future<void> _checkServer() async {
+    if (_serverChecking) return;
+    setState(() => _serverChecking = true);
+    final healthy = await ServerHealth.check();
+    if (!mounted) return;
+    setState(() {
+      _serverHealthy = healthy;
+      _serverChecking = false;
+    });
   }
 
   Future<void> _refresh() async {
@@ -113,11 +131,22 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.refresh_rounded),
-                      onPressed: _loading ? null : _refresh,
+                      onPressed: (_loading || _serverChecking)
+                          ? null
+                          : () {
+                              _refresh();
+                              _checkServer();
+                            },
                       tooltip: 'Refresh',
                     ),
                   ],
                 ),
+              ),
+              // ── Server health card ───────────────────────────────────────
+              _ServerHealthCard(
+                checking: _serverChecking,
+                healthy: _serverHealthy,
+                onRecheck: _checkServer,
               ),
               if (!_loading && _entries.isNotEmpty)
                 Padding(
@@ -162,6 +191,100 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Server health card ────────────────────────────────────────────────────────
+
+class _ServerHealthCard extends StatelessWidget {
+  final bool checking;
+  final bool? healthy;
+  final VoidCallback onRecheck;
+
+  const _ServerHealthCard({
+    required this.checking,
+    required this.healthy,
+    required this.onRecheck,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color statusColor;
+    final IconData statusIcon;
+    final String statusLabel;
+
+    if (checking || healthy == null) {
+      statusColor = Colors.white38;
+      statusIcon = Icons.hourglass_top_rounded;
+      statusLabel = 'Checking…';
+    } else if (healthy!) {
+      statusColor = Colors.greenAccent;
+      statusIcon = Icons.check_circle_rounded;
+      statusLabel = 'Online';
+    } else {
+      statusColor = Colors.redAccent;
+      statusIcon = Icons.cancel_rounded;
+      statusLabel = 'Unreachable';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: statusColor.withValues(alpha: checking ? 0.1 : 0.25),
+          ),
+        ),
+        child: Row(
+          children: [
+            checking
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: statusColor,
+                    ),
+                  )
+                : Icon(statusIcon, color: statusColor, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Server — $statusLabel',
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    AppConfig.healthUrl,
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              color: Colors.white38,
+              onPressed: checking ? null : onRecheck,
+              tooltip: 'Re-check',
+            ),
+          ],
         ),
       ),
     );
