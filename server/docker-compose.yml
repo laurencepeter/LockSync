@@ -11,7 +11,7 @@ version: "3.8"
 services:
   locksync-server:
     build:
-      context: .
+      context: ./server
       dockerfile: Dockerfile
     container_name: locksync-server
     restart: unless-stopped
