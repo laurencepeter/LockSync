@@ -22,8 +22,8 @@ const { v4: uuidv4 } = require('uuid');
 
 // ─── Config ──────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT, 10) || 8080;
-const JWT_SECRET = process.env.JWT_SECRET || (() => {
-  console.error('FATAL: JWT_SECRET is not set. Exiting.');
+const JWT_SECRET = process.env.JWT_SECRET?.trim() || (() => {
+  console.error('FATAL: JWT_SECRET is not set or is empty. Exiting.');
   process.exit(1);
 })();
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
@@ -606,6 +606,44 @@ setInterval(() => {
     }
   }
 }, 60000);
+
+// ─── Graceful shutdown ───────────────────────────────────────────────
+function gracefulShutdown(signal) {
+  console.log(`[LockSync] ${signal} received — shutting down gracefully…`);
+
+  // Stop accepting new HTTP/WS connections
+  server.close(() => {
+    console.log('[LockSync] HTTP server closed');
+  });
+
+  // Close all open WebSocket connections so clients know to reconnect
+  for (const ws of wss.clients) {
+    try { ws.close(1001, 'Server restarting'); } catch (_) {}
+  }
+
+  // Persist pairs before exit
+  savePairs();
+
+  // Force-exit if clean shutdown takes too long (e.g. stuck sockets)
+  const forceExit = setTimeout(() => {
+    console.log('[LockSync] Force-exit after shutdown timeout');
+    process.exit(0);
+  }, 5000);
+  forceExit.unref(); // don't keep the event loop alive just for this timer
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
+// Surface unexpected crashes in logs instead of a silent restart
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection:', reason);
+  process.exit(1);
+});
 
 // ─── Start ───────────────────────────────────────────────────────────
 ensureDataDir();
