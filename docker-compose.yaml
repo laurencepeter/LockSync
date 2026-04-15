@@ -1,8 +1,13 @@
 version: "3.8"
 
-# LockSync relay server — deploy via Coolify or standalone.
-# Coolify: point to this file and set env vars in the Coolify dashboard.
-# Standalone: cp .env.example .env && edit .env && docker compose up -d
+# Full-stack deployment (locksync-server + ntfy) — used by Coolify or standalone.
+#
+# Coolify settings for the ntfy service or full-stack deploy:
+#   Base Directory          = /        ← root of the repo
+#   Docker Compose Location = docker-compose.yaml   ← this file
+#
+# To deploy ONLY the relay server via Coolify use /server/docker-compose.yaml
+# (Base Directory = /server) instead.
 
 services:
   locksync-server:
