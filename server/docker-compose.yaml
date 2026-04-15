@@ -1,0 +1,45 @@
+version: "3.8"
+
+# LockSync relay server — Coolify deployment from /server base directory.
+#
+# Coolify settings:
+#   Base Directory          = /server
+#   Docker Compose Location = docker-compose.yaml   ← this file
+#
+# For standalone local deployment use docker-compose.yml (reads .env) instead.
+
+services:
+  locksync-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: locksync-server
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - PORT=8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    volumes:
+      - locksync_data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  locksync_data:
