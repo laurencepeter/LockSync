@@ -113,6 +113,14 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
+server.on('error', (err) => {
+  console.error('[SERVER] HTTP server error:', err);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[SERVER] Port ${PORT} is already in use. Exiting.`);
+    process.exit(1);
+  }
+});
+
 // ─── WebSocket server ────────────────────────────────────────────────
 const wss = new WebSocketServer({
   server,
@@ -127,6 +135,10 @@ const wss = new WebSocketServer({
     }
     done(true);
   },
+});
+
+wss.on('error', (err) => {
+  console.error('[WSS] WebSocket server error:', err);
 });
 
 wss.on('connection', (ws, req) => {
@@ -577,7 +589,7 @@ function sanitizeText(text) {
 }
 
 // ─── Periodic cleanup ────────────────────────────────────────────────
-setInterval(() => {
+const cleanupInterval = setInterval(() => {
   const now = Date.now();
 
   for (const [code, entry] of pairingCodes) {
@@ -610,6 +622,9 @@ setInterval(() => {
 // ─── Graceful shutdown ───────────────────────────────────────────────
 function gracefulShutdown(signal) {
   console.log(`[LockSync] ${signal} received — shutting down gracefully…`);
+
+  // Stop the periodic cleanup so the event loop can drain naturally
+  clearInterval(cleanupInterval);
 
   // Stop accepting new HTTP/WS connections
   server.close(() => {
