@@ -9,7 +9,9 @@ COPY src/ src/
 
 # Non-root user for security
 RUN addgroup -g 1001 -S locksync && \
-    adduser -S locksync -u 1001 -G locksync
+    adduser -S locksync -u 1001 -G locksync && \
+    mkdir -p /app/data && \
+    chown -R locksync:locksync /app
 USER locksync
 
 EXPOSE 8080

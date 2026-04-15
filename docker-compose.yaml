@@ -29,6 +29,8 @@ services:
         limits:
           memory: 128M
           cpus: "0.5"
+    volumes:
+      - locksync_data:/app/data
     logging:
       driver: json-file
       options:
@@ -83,5 +85,6 @@ services:
       start_period: 40s
 
 volumes:
+  locksync_data:
   ntfy-cache:
   ntfy-db:
