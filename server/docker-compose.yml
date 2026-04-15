@@ -1,18 +1,8 @@
 version: "3.8"
 
-# LockSync relay server — deploy via Coolify or standalone Docker.
-#
-# ── Coolify deployment ──────────────────────────────────────────────
-# 1. In Coolify, create a new service → "Docker Compose" → point to this repo.
-# 2. Set the Port to 8080 in the Coolify service settings (Coolify/Traefik
-#    will handle TLS + WSS termination automatically).
-# 3. Add the env vars below in the Coolify "Environment Variables" panel.
-# 4. Enable "Expose Port" OFF — Coolify's Traefik proxy reaches the container
-#    via Docker's internal network; the host never sees port 8080 directly.
-#
-# ── Standalone deployment (no Coolify) ─────────────────────────────
-# cp .env.example .env && edit .env && docker compose up -d
-# Then put server/nginx-locksync.conf in your Nginx config.
+# LockSync relay server — deploy via Coolify or standalone.
+# Coolify: point to the root docker-compose.yaml and set env vars in the Coolify dashboard.
+# Standalone: cp .env.example .env && edit .env && docker compose up -d
 
 services:
   locksync-server:
@@ -21,21 +11,13 @@ services:
       dockerfile: Dockerfile
     container_name: locksync-server
     restart: unless-stopped
-    # Do NOT bind to host ports when running behind Coolify/Traefik.
-    # Coolify connects to the container directly on the internal Docker network.
-    # For standalone use, uncomment the lines below:
-    # ports:
-    #   - "127.0.0.1:8080:8080"   # bind to localhost only; Nginx proxies externally
-    expose:
-      - "8080"
-    volumes:
-      # Persist pairs.json across container restarts — pairs are permanent
-      - locksync_data:/app/data
-    env_file:
-      - .env
+    ports:
+      - "${HOST_PORT:-3000}:8080"
     environment:
       - NODE_ENV=production
-      - DATA_DIR=/app/data
+      - JWT_SECRET=${JWT_SECRET}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - PORT=8080
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 30s
@@ -47,6 +29,8 @@ services:
         limits:
           memory: 128M
           cpus: "0.5"
+    volumes:
+      - locksync_data:/app/data
     logging:
       driver: json-file
       options:
@@ -55,5 +39,3 @@ services:
 
 volumes:
   locksync_data:
-    # Named volume — Docker manages the path; persists across `docker compose down`
-    # In Coolify, this maps to a managed persistent volume automatically.
