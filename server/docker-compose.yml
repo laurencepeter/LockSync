@@ -1,8 +1,12 @@
 version: "3.8"
 
-# LockSync relay server — deploy via Coolify or standalone.
-# Coolify: point to the root docker-compose.yaml and set env vars in the Coolify dashboard.
-# Standalone: cp .env.example .env && edit .env && docker compose up -d
+# LockSync relay server — standalone deployment (no Coolify).
+# For Coolify: use the root docker-compose.yaml instead.
+#
+# Standalone usage:
+#   cp .env.example .env
+#   # edit .env and set JWT_SECRET
+#   docker compose up -d
 
 services:
   locksync-server:
@@ -13,9 +17,10 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-3000}:8080"
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
-      - JWT_SECRET=${JWT_SECRET}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       - PORT=8080
     healthcheck:
