@@ -10,7 +10,9 @@ version: "3.8"
 
 services:
   locksync-server:
-    image: ghcr.io/laurencepeter/locksync-server:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: locksync-server
     restart: unless-stopped
     expose:
