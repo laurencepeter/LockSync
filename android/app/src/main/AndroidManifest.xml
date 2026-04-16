@@ -21,6 +21,8 @@
     <!-- Keep WiFi alive in background -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- USE_EXACT_ALARM — lets the app schedule exact wake-up alarms on Android 12+ -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
     <!-- Full-screen intent — wake + show the app over the lock screen.
          On Android 14+ the user must explicitly grant this in System Settings;
@@ -71,15 +73,32 @@
             </intent-filter>
         </activity>
 
-        <!-- Custom background service that extends flutter_background_service's
-             BackgroundService to register WallpaperPlugin in the background
-             engine — this allows the lock screen wallpaper to update even
-             when the app is fully closed. -->
+        <!-- Override the flutter_background_service plugin's BackgroundService
+             entry to (a) keep it non-exported and (b) remove the
+             "connectedDevice" foreground-service type that lacks a matching
+             permission declaration — leaving only "dataSync". -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="dataSync|connectedDevice"
+            android:foregroundServiceType="dataSync"
             android:exported="false"
-            tools:replace="android:exported"/>
+            tools:replace="android:exported,android:foregroundServiceType"/>
+
+        <!-- LockSyncBackgroundService extends BackgroundService to register
+             WallpaperPlugin in the background engine so the lock screen
+             wallpaper can be updated from the background isolate.
+             Declared here so proguard/R8 does not strip the class. -->
+        <service
+            android:name="com.locksync.app.LockSyncBackgroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"/>
+
+        <!-- ScreenOnReceiver is registered dynamically in MainApplication
+             (ACTION_SCREEN_ON cannot be declared in the manifest), but we
+             declare the receiver here so the build system is aware of it
+             and proguard/R8 keeps the class. -->
+        <receiver
+            android:name="com.locksync.app.ScreenOnReceiver"
+            android:exported="false"/>
 
         <meta-data
             android:name="flutterEmbedding"

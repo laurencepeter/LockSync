@@ -193,11 +193,14 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
 
 /// Embeds the PairingScreen widget directly (no outer Scaffold) so we get the
 /// full Generate / Enter Code flow inside the Developer screen.
+/// disableAutoNavigate=true prevents PairingScreen from calling
+/// pushAndRemoveUntil when already paired, which would blow away the
+/// DeveloperScreen (causing the "flash then disappear" bug).
 class _EmbeddedPairing extends StatelessWidget {
   const _EmbeddedPairing();
 
   @override
   Widget build(BuildContext context) {
-    return const PairingScreen();
+    return const PairingScreen(disableAutoNavigate: true);
   }
 }
