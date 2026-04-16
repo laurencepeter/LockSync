@@ -72,7 +72,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// 1793 → Developer mode  (pairing)
   void _showPinDialog() {
     final pinController = TextEditingController();
-    showDialog(
+    // Explicit FocusNode so we can force keyboard open on devices where
+    // autofocus inside an AlertDialog doesn't trigger the IME reliably.
+    final pinFocusNode = FocusNode();
+
+    showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
@@ -82,8 +86,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: TextStyle(color: Colors.white)),
         content: TextField(
           controller: pinController,
+          focusNode: pinFocusNode,
           autofocus: true,
-          keyboardType: TextInputType.number,
+          // TextInputType.visiblePassword keeps digits-only appearance while
+          // still showing the full keyboard on devices where TextInputType.number
+          // silently fails to open the IME.
+          keyboardType: TextInputType.visiblePassword,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+          ],
           maxLength: 4,
           obscureText: true,
           style: const TextStyle(
@@ -96,9 +107,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: Colors.white.withValues(alpha: 0.2),
                 letterSpacing: 8),
           ),
+          // Defer navigation to the next frame so the dialog close animation
+          // completes before we push a new route — prevents the "flash then
+          // disappear" effect caused by Navigator.push racing with pop.
           onSubmitted: (pin) {
             Navigator.pop(ctx);
-            _handlePin(pin);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _handlePin(pin);
+            });
           },
         ),
         actions: [
@@ -111,13 +127,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () {
               final pin = pinController.text;
               Navigator.pop(ctx);
-              _handlePin(pin);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _handlePin(pin);
+              });
             },
             child: const Text('Unlock'),
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      pinController.dispose();
+      pinFocusNode.dispose();
+    });
+
+    // Force the keyboard open after the dialog's widget tree is fully built.
+    // Some Android devices (especially those with aggressive battery policies)
+    // ignore autofocus inside AlertDialog until we explicitly request focus.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) pinFocusNode.requestFocus();
+    });
   }
 
   void _handlePin(String pin) {

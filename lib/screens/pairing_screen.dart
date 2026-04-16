@@ -11,7 +11,13 @@ import 'qr_scanner_screen.dart';
 import 'display_name_screen.dart';
 
 class PairingScreen extends StatefulWidget {
-  const PairingScreen({super.key});
+  /// When true the screen will NOT navigate away after pairing completes.
+  /// Used by [DeveloperScreen] to embed the pairing UI without replacing the
+  /// entire navigation stack — the default (false) preserves the existing
+  /// post-pairing flow for the normal welcome experience.
+  final bool disableAutoNavigate;
+
+  const PairingScreen({super.key, this.disableAutoNavigate = false});
 
   @override
   State<PairingScreen> createState() => _PairingScreenState();
@@ -124,8 +130,11 @@ class _PairingScreenState extends State<PairingScreen>
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
 
-    // Navigate to display name screen when paired
-    if (ws.status == ConnectionStatus.paired && !_navigated) {
+    // Navigate to display name screen when paired — skipped in embedded/dev
+    // mode so the DeveloperScreen is not blown off the navigation stack.
+    if (ws.status == ConnectionStatus.paired &&
+        !_navigated &&
+        !widget.disableAutoNavigate) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _navigateToDisplayName());
     }
