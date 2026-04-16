@@ -23,189 +23,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Authenticate to GitHub Container Registry
-        id: auth
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          MAX_RETRIES=5
-          RETRY_DELAY=2
-          ATTEMPT=0
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Authentication attempt $ATTEMPT of $MAX_RETRIES..."
+      - name: Build and push main Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/npups:latest
+            ghcr.io/${{ github.repository_owner }}/npups:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-            if echo "$GITHUB_TOKEN" | docker login ghcr.io \
-                -u "${{ github.actor }}" \
-                --password-stdin 2>&1; then
-              echo "Authentication successful on attempt $ATTEMPT"
-              break
-            fi
-
-            if [ $ATTEMPT -lt $MAX_RETRIES ]; then
-              echo "Authentication failed. Retrying in ${RETRY_DELAY}s..."
-              sleep $RETRY_DELAY
-              RETRY_DELAY=$((RETRY_DELAY * 2))
-            else
-              echo "Authentication failed after $MAX_RETRIES attempts."
-              exit 1
-            fi
-          done
-
-      - name: Build Docker image
-        id: build
-        run: |
-          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/npups:${{ github.sha }}"
-          IMAGE_LATEST="ghcr.io/${{ github.repository_owner }}/npups:latest"
-
-          MAX_RETRIES=3
-          RETRY_DELAY=4
-          ATTEMPT=0
-
-          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Build attempt $ATTEMPT of $MAX_RETRIES..."
-
-            if docker buildx build \
-                --tag "$IMAGE_NAME" \
-                --tag "$IMAGE_LATEST" \
-                --cache-from "type=gha" \
-                --cache-to "type=gha,mode=max" \
-                --load \
-                . 2>&1; then
-              echo "Build successful on attempt $ATTEMPT"
-              echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
-              echo "image_latest=$IMAGE_LATEST" >> "$GITHUB_OUTPUT"
-              break
-            fi
-
-            if [ $ATTEMPT -lt $MAX_RETRIES ]; then
-              echo "Build failed. Retrying in ${RETRY_DELAY}s..."
-              sleep $RETRY_DELAY
-              RETRY_DELAY=$((RETRY_DELAY * 2))
-            else
-              echo "Build failed after $MAX_RETRIES attempts."
-              exit 1
-            fi
-          done
-
-      - name: Build server Docker image
-        id: build-server
-        run: |
-          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/locksync-server:${{ github.sha }}"
-          IMAGE_LATEST="ghcr.io/${{ github.repository_owner }}/locksync-server:latest"
-
-          MAX_RETRIES=3
-          RETRY_DELAY=4
-          ATTEMPT=0
-
-          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Build attempt $ATTEMPT of $MAX_RETRIES..."
-
-            if docker buildx build \
-                --tag "$IMAGE_NAME" \
-                --tag "$IMAGE_LATEST" \
-                --cache-from "type=gha" \
-                --cache-to "type=gha,mode=max" \
-                --load \
-                ./server 2>&1; then
-              echo "Build successful on attempt $ATTEMPT"
-              echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
-              echo "image_latest=$IMAGE_LATEST" >> "$GITHUB_OUTPUT"
-              break
-            fi
-
-            if [ $ATTEMPT -lt $MAX_RETRIES ]; then
-              echo "Build failed. Retrying in ${RETRY_DELAY}s..."
-              sleep $RETRY_DELAY
-              RETRY_DELAY=$((RETRY_DELAY * 2))
-            else
-              echo "Build failed after $MAX_RETRIES attempts."
-              exit 1
-            fi
-          done
-
-      - name: Push Docker image
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-        run: |
-          IMAGE_NAME="${{ steps.build.outputs.image_name }}"
-          IMAGE_LATEST="${{ steps.build.outputs.image_latest }}"
-
-          MAX_RETRIES=5
-          RETRY_DELAY=2
-
-          for TAG in "$IMAGE_NAME" "$IMAGE_LATEST"; do
-            ATTEMPT=0
-            RETRY_DELAY=2
-
-            while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-              ATTEMPT=$((ATTEMPT + 1))
-              echo "Push attempt $ATTEMPT of $MAX_RETRIES for $TAG..."
-
-              if docker push "$TAG" 2>&1; then
-                echo "Push successful for $TAG on attempt $ATTEMPT"
-                break
-              fi
-
-              if [ $ATTEMPT -lt $MAX_RETRIES ]; then
-                echo "Push failed. Retrying in ${RETRY_DELAY}s..."
-                sleep $RETRY_DELAY
-                RETRY_DELAY=$((RETRY_DELAY * 2))
-              else
-                echo "Push failed after $MAX_RETRIES attempts for $TAG."
-                exit 1
-              fi
-            done
-          done
-
-      - name: Push server Docker image
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-        run: |
-          IMAGE_NAME="${{ steps.build-server.outputs.image_name }}"
-          IMAGE_LATEST="${{ steps.build-server.outputs.image_latest }}"
-
-          MAX_RETRIES=5
-          RETRY_DELAY=2
-
-          for TAG in "$IMAGE_NAME" "$IMAGE_LATEST"; do
-            ATTEMPT=0
-            RETRY_DELAY=2
-
-            while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-              ATTEMPT=$((ATTEMPT + 1))
-              echo "Push attempt $ATTEMPT of $MAX_RETRIES for $TAG..."
-
-              if docker push "$TAG" 2>&1; then
-                echo "Push successful for $TAG on attempt $ATTEMPT"
-                break
-              fi
-
-              if [ $ATTEMPT -lt $MAX_RETRIES ]; then
-                echo "Push failed. Retrying in ${RETRY_DELAY}s..."
-                sleep $RETRY_DELAY
-                RETRY_DELAY=$((RETRY_DELAY * 2))
-              else
-                echo "Push failed after $MAX_RETRIES attempts for $TAG."
-                exit 1
-              fi
-            done
-          done
-
-      - name: Make GHCR packages public
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for PACKAGE in locksync-server npups; do
-            echo "Setting $PACKAGE visibility to public..."
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X PATCH \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/user/packages/container/${PACKAGE}" \
-              -d '{"visibility":"public"}')
-            echo "$PACKAGE visibility update HTTP status: $STATUS"
-          done
+      - name: Build and push server Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server
+          push: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/locksync-server:latest
+            ghcr.io/${{ github.repository_owner }}/locksync-server:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
