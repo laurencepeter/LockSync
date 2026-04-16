@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/widgets.dart';
+import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -442,6 +443,17 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         _partnerDisplayName = payload['displayName'] as String?;
         if (_partnerDisplayName != null) {
           storage.setPartnerName(_partnerDisplayName!);
+          // Keep the active dev profile's cached partner name in sync so the
+          // profile list shows the correct name without needing a manual snapshot.
+          final activeId = storage.activeDevProfileId;
+          if (activeId != null) {
+            final profiles = storage.getDevProfiles();
+            final idx = profiles.indexWhere((p) => p.id == activeId);
+            if (idx >= 0) {
+              profiles[idx].partnerDisplayName = _partnerDisplayName;
+              storage.saveDevProfile(profiles[idx]);
+            }
+          }
         }
         notifyListeners();
         break;
@@ -722,6 +734,127 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _status = ConnectionStatus.connected;
     notifyListeners();
   }
+
+  // ─── Developer multi-profile ──────────────────────────────────────────────
+
+  /// All saved dev profiles (read from persistent storage).
+  List<DevProfile> get devProfiles => storage.getDevProfiles();
+
+  /// ID of the currently-active dev profile (null = no dev profile active).
+  String? get activeDevProfileId => storage.activeDevProfileId;
+
+  /// Saves the current live session as a named developer profile and marks
+  /// it as the active one.  Called from DeveloperScreen after pairing.
+  Future<DevProfile> saveCurrentSessionAsDevProfile(String label) async {
+    final profile = DevProfile(
+      id: const Uuid().v4(),
+      label: label,
+      accessToken: storage.accessToken ?? '',
+      refreshToken: storage.refreshToken ?? '',
+      pairId: _pairId ?? storage.pairId ?? '',
+      partnerId: _partnerId ?? storage.partnerId ?? '',
+      myDisplayName: storage.displayName,
+      partnerDisplayName: _partnerDisplayName,
+      canvasState: storage.canvasState,
+      partnerMood: _partnerMood,
+      partnerText: _partnerText.isEmpty ? null : _partnerText,
+    );
+    await storage.saveDevProfile(profile);
+    await storage.setActiveDevProfileId(profile.id);
+    return profile;
+  }
+
+  /// Updates the label/name of an existing dev profile.
+  Future<void> renameDevProfile(String id, String newLabel) async {
+    final profiles = storage.getDevProfiles();
+    final idx = profiles.indexWhere((p) => p.id == id);
+    if (idx < 0) return;
+    profiles[idx].label = newLabel;
+    await storage.saveDevProfile(profiles[idx]);
+    notifyListeners();
+  }
+
+  /// Deletes a dev profile.  If it was the active one the connection is
+  /// unchanged — the caller should decide whether to switch or disconnect.
+  Future<void> deleteDevProfile(String id) async {
+    await storage.deleteDevProfile(id);
+    notifyListeners();
+  }
+
+  /// Saves a snapshot of the current live state into the currently-active
+  /// dev profile so nothing is lost when switching.
+  Future<void> _snapshotActiveDevProfile() async {
+    final activeId = storage.activeDevProfileId;
+    if (activeId == null) return;
+    final profiles = storage.getDevProfiles();
+    final idx = profiles.indexWhere((p) => p.id == activeId);
+    if (idx < 0) return;
+    final p = profiles[idx];
+    p.partnerDisplayName = _partnerDisplayName;
+    p.partnerMood = _partnerMood;
+    p.partnerText = _partnerText.isEmpty ? null : _partnerText;
+    p.canvasState = storage.canvasState;
+    p.myDisplayName = storage.displayName;
+    await storage.saveDevProfile(p);
+  }
+
+  /// Switches the live WebSocket connection to [profile].
+  ///
+  /// Steps:
+  ///   1. Flush the current live state into the currently-active profile.
+  ///   2. Overwrite main-storage credentials with [profile]'s credentials.
+  ///   3. Pre-populate in-memory state with [profile]'s cached data so the
+  ///      UI shows something meaningful before the server responds.
+  ///   4. Disconnect and reconnect — the existing auth flow handles the rest.
+  Future<void> switchDevProfile(DevProfile profile) async {
+    await _snapshotActiveDevProfile();
+
+    // Persist new credentials as the "current session"
+    await storage.saveSession(
+      accessToken: profile.accessToken,
+      refreshToken: profile.refreshToken,
+      pairId: profile.pairId,
+      partnerId: profile.partnerId,
+    );
+    if (profile.myDisplayName != null && profile.myDisplayName!.isNotEmpty) {
+      await storage.setDisplayName(profile.myDisplayName!);
+    }
+    await storage.setActiveDevProfileId(profile.id);
+
+    // Restore cached live state for the selected profile
+    _pairId = profile.pairId;
+    _partnerId = profile.partnerId;
+    _partnerDisplayName = profile.partnerDisplayName;
+    _partnerMood = profile.partnerMood;
+    _partnerText = profile.partnerText ?? '';
+    if (profile.canvasState != null) {
+      try {
+        final decoded = jsonDecode(profile.canvasState!) as Map<String, dynamic>;
+        _partnerCanvasData = decoded;
+        _canvasSyncController.add(decoded);
+      } catch (_) {
+        _partnerCanvasData = null;
+      }
+    } else {
+      _partnerCanvasData = null;
+    }
+
+    // Disconnect and reconnect with the new credentials
+    _pingTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _channel?.sink.close();
+    _channel = null;
+    _status = ConnectionStatus.disconnected;
+    _partnerOnline = false;
+    _isReconnecting = false;
+    notifyListeners();
+
+    // Small delay so any in-flight close frames settle before reconnecting.
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!_disposed) connect();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
 
   void clearError() {
     _errorMessage = null;

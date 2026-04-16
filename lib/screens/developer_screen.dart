@@ -1,17 +1,22 @@
 /// Developer Screen — accessible via Settings hidden menu with PIN 1793.
 ///
-/// Exposes the full pairing UI so a developer / power user can pair with a
-/// different device without going through the welcome flow.  Pairing from
-/// here replaces the existing pair session (same as joining on first launch).
-///
-/// Also contains dev-only toggles (e.g. disabling screenshot blocking) that
-/// must NOT appear in the regular Settings screen.
+/// Exposes:
+///   • A list of saved dev profiles (one per test partner).  Tap "Activate"
+///     to switch the live WebSocket connection to that profile so you can
+///     interact with that partner's full session (text, canvas, mood, etc.).
+///   • A "Pair New Profile" section backed by the embedded PairingScreen.
+///     After pairing you are prompted to label the new profile before it is
+///     saved to the list.
+///   • Dev-only toggles (screenshot blocking) that must NOT appear in the
+///     regular Settings screen.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/storage_service.dart';
 import '../services/websocket_service.dart';
+import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'pairing_screen.dart';
 
@@ -24,6 +29,12 @@ class DeveloperScreen extends StatefulWidget {
 
 class _DeveloperScreenState extends State<DeveloperScreen> {
   bool _screenshotDevMode = false;
+
+  /// Whether the "Pair New Profile" section is expanded.
+  bool _pairSectionExpanded = false;
+
+  /// Non-null while a profile-switch is in progress.
+  String? _switchingProfileId;
 
   @override
   void initState() {
@@ -38,16 +49,134 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
     setState(() => _screenshotDevMode = value);
   }
 
+  // ── After a new pair completes, prompt for a label and save the profile ──
+
+  Future<void> _onPairComplete(WebSocketService ws) async {
+    // Determine a default label from the partner name (may be null until sync).
+    final defaultLabel =
+        ws.partnerDisplayName ?? ws.storage.partnerName ?? 'Profile';
+
+    final label = await _showLabelDialog(defaultLabel);
+    if (!mounted) return;
+
+    final profile = await ws.saveCurrentSessionAsDevProfile(label ?? defaultLabel);
+
+    setState(() {
+      _pairSectionExpanded = false;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Profile "${profile.label}" saved and activated.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<String?> _showLabelDialog(String initialValue) async {
+    final controller = TextEditingController(text: initialValue);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Name this profile',
+            style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'e.g. Alice, Test User 2…',
+            hintStyle:
+                TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim().isEmpty ? null : v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final v = controller.text.trim();
+              Navigator.pop(ctx, v.isEmpty ? null : v);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Profile actions ───────────────────────────────────────────────────────
+
+  Future<void> _activateProfile(WebSocketService ws, DevProfile profile) async {
+    setState(() => _switchingProfileId = profile.id);
+    await ws.switchDevProfile(profile);
+    if (mounted) setState(() => _switchingProfileId = null);
+  }
+
+  Future<void> _renameProfile(WebSocketService ws, DevProfile profile) async {
+    final label = await _showLabelDialog(profile.label);
+    if (label != null && mounted) {
+      await ws.renameDevProfile(profile.id, label);
+      setState(() {});
+    }
+  }
+
+  Future<void> _deleteProfile(WebSocketService ws, DevProfile profile) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete profile?',
+            style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Remove "${profile.label}"?\nThis only deletes the local profile — '
+          'the pairing on the server is not affected.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await ws.deleteDevProfile(profile.id);
+      setState(() {});
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final ws = context.watch<WebSocketService>();
+    final profiles = ws.devProfiles;
+    final activeId = ws.activeDevProfileId;
 
     return Scaffold(
       body: AnimatedGradientBg(
         child: SafeArea(
           child: Column(
             children: [
-              // Header
+              // ── Header ─────────────────────────────────────────────────
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -94,95 +223,147 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
                 ),
               ),
 
-              // Status chip
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: ws.status == ConnectionStatus.paired
-                      ? Colors.green.withValues(alpha: 0.1)
-                      : Colors.amber.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: ws.status == ConnectionStatus.paired
-                        ? Colors.green.withValues(alpha: 0.3)
-                        : Colors.amber.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+              // ── Body (scrollable) ──────────────────────────────────────
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
-                    Icon(
-                      ws.status == ConnectionStatus.paired
-                          ? Icons.link_rounded
-                          : Icons.link_off_rounded,
-                      size: 16,
-                      color: ws.status == ConnectionStatus.paired
-                          ? Colors.green
-                          : Colors.amber,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      ws.status == ConnectionStatus.paired
-                          ? 'Currently paired — new pair will replace this session'
-                          : 'Not paired',
-                      style: TextStyle(
-                        color: ws.status == ConnectionStatus.paired
-                            ? Colors.green
-                            : Colors.amber,
-                        fontSize: 13,
+                    // ── Dev-only settings ──────────────────────────────
+                    _SectionHeader(title: 'SETTINGS'),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.03),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.05)),
+                      ),
+                      child: SwitchListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
+                        secondary: Icon(
+                          Icons.screenshot_monitor_rounded,
+                          color: _screenshotDevMode
+                              ? Colors.orange
+                              : Colors.white38,
+                          size: 22,
+                        ),
+                        title: const Text(
+                          'Allow Screenshots in Moments',
+                          style: TextStyle(color: Colors.white, fontSize: 15),
+                        ),
+                        subtitle: Text(
+                          _screenshotDevMode
+                              ? 'Screenshot blocking disabled'
+                              : 'Screenshots blocked (default)',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12),
+                        ),
+                        value: _screenshotDevMode,
+                        onChanged: _toggleScreenshotDevMode,
+                        activeColor: Colors.orange,
                       ),
                     ),
+
+                    const SizedBox(height: 24),
+
+                    // ── Profiles ───────────────────────────────────────
+                    _SectionHeader(title: 'TEST PROFILES'),
+
+                    if (profiles.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'No profiles yet. Pair with a test user below\n'
+                          'to create your first profile.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              fontSize: 13),
+                        ),
+                      ),
+
+                    for (final profile in profiles)
+                      _ProfileTile(
+                        profile: profile,
+                        isActive: profile.id == activeId,
+                        isSwitching: _switchingProfileId == profile.id,
+                        onActivate: () => _activateProfile(ws, profile),
+                        onRename: () => _renameProfile(ws, profile),
+                        onDelete: () => _deleteProfile(ws, profile),
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Active session info ────────────────────────────
+                    if (ws.status == ConnectionStatus.paired)
+                      _ActiveSessionBanner(ws: ws, activeProfileId: activeId),
+
+                    const SizedBox(height: 8),
+
+                    // ── Pair new profile ───────────────────────────────
+                    _SectionHeader(title: 'PAIR NEW PROFILE'),
+
+                    GestureDetector(
+                      onTap: () => setState(
+                          () => _pairSectionExpanded = !_pairSectionExpanded),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: _pairSectionExpanded
+                              ? LockSyncTheme.primaryColor.withValues(alpha: 0.15)
+                              : Colors.white.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: _pairSectionExpanded
+                                ? LockSyncTheme.primaryColor.withValues(alpha: 0.4)
+                                : Colors.white.withValues(alpha: 0.05),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.add_link_rounded,
+                              color: _pairSectionExpanded
+                                  ? LockSyncTheme.primaryColor
+                                  : Colors.white54,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _pairSectionExpanded
+                                    ? 'Pair with a new test user'
+                                    : 'Tap to pair with a new test user…',
+                                style: TextStyle(
+                                  color: _pairSectionExpanded
+                                      ? Colors.white
+                                      : Colors.white54,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              _pairSectionExpanded
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              color: Colors.white38,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    if (_pairSectionExpanded) ...[
+                      const SizedBox(height: 8),
+                      _EmbeddedPairing(onPairComplete: () => _onPairComplete(ws)),
+                    ],
+
+                    const SizedBox(height: 32),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 8),
-
-              // Dev-only settings
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(16),
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: 0.05)),
-                  ),
-                  child: SwitchListTile(
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    secondary: Icon(
-                      Icons.screenshot_monitor_rounded,
-                      color: _screenshotDevMode
-                          ? Colors.orange
-                          : Colors.white38,
-                      size: 22,
-                    ),
-                    title: const Text(
-                      'Allow Screenshots in Moments',
-                      style: TextStyle(color: Colors.white, fontSize: 15),
-                    ),
-                    subtitle: Text(
-                      _screenshotDevMode
-                          ? 'Screenshot blocking disabled'
-                          : 'Screenshots blocked (default)',
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 12),
-                    ),
-                    value: _screenshotDevMode,
-                    onChanged: _toggleScreenshotDevMode,
-                    activeColor: Colors.orange,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              const Divider(color: Colors.white10),
-
-              // Reuse the full pairing screen content
-              const Expanded(child: _EmbeddedPairing()),
             ],
           ),
         ),
@@ -191,16 +372,254 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
   }
 }
 
-/// Embeds the PairingScreen widget directly (no outer Scaffold) so we get the
-/// full Generate / Enter Code flow inside the Developer screen.
-/// disableAutoNavigate=true prevents PairingScreen from calling
-/// pushAndRemoveUntil when already paired, which would blow away the
-/// DeveloperScreen (causing the "flash then disappear" bug).
-class _EmbeddedPairing extends StatelessWidget {
-  const _EmbeddedPairing();
+// ── Widgets ───────────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader({required this.title});
 
   @override
   Widget build(BuildContext context) {
-    return const PairingScreen(disableAutoNavigate: true);
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: LockSyncTheme.primaryColor.withValues(alpha: 0.7),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+class _ActiveSessionBanner extends StatelessWidget {
+  final WebSocketService ws;
+  final String? activeProfileId;
+  const _ActiveSessionBanner(
+      {required this.ws, required this.activeProfileId});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = activeProfileId == null
+        ? null
+        : ws.devProfiles
+            .where((p) => p.id == activeProfileId)
+            .map((p) => p.label)
+            .firstOrNull;
+    final partnerName = ws.partnerDisplayName ?? ws.storage.partnerName;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.green.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border:
+            Border.all(color: Colors.green.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.link_rounded, size: 16, color: Colors.greenAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label != null
+                  ? 'Active profile: $label'
+                  : partnerName != null
+                      ? 'Live session with $partnerName'
+                      : 'Paired (no profile selected)',
+              style:
+                  const TextStyle(color: Colors.greenAccent, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileTile extends StatelessWidget {
+  final DevProfile profile;
+  final bool isActive;
+  final bool isSwitching;
+  final VoidCallback onActivate;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+
+  const _ProfileTile({
+    required this.profile,
+    required this.isActive,
+    required this.isSwitching,
+    required this.onActivate,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive
+            ? LockSyncTheme.primaryColor.withValues(alpha: 0.12)
+            : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isActive
+              ? LockSyncTheme.primaryColor.withValues(alpha: 0.4)
+              : Colors.white.withValues(alpha: 0.05),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Active indicator dot
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isActive ? Colors.greenAccent : Colors.white24,
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Profile info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  profile.label,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500),
+                ),
+                if (profile.partnerDisplayName != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Partner: ${profile.partnerDisplayName}',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 2),
+                Text(
+                  'Pair ID: ${profile.pairId.length > 12 ? '${profile.pairId.substring(0, 12)}…' : profile.pairId}',
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.3),
+                      fontSize: 11,
+                      fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+
+          // Actions
+          if (isSwitching)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else ...[
+            if (!isActive)
+              TextButton(
+                onPressed: onActivate,
+                style: TextButton.styleFrom(
+                  foregroundColor: LockSyncTheme.primaryColor,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('Activate',
+                    style:
+                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded,
+                  color: Colors.white38, size: 20),
+              color: const Color(0xFF1A1A2E),
+              onSelected: (v) {
+                if (v == 'rename') onRename();
+                if (v == 'delete') onDelete();
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_rounded, size: 18, color: Colors.white70),
+                      SizedBox(width: 8),
+                      Text('Rename',
+                          style: TextStyle(color: Colors.white70)),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline_rounded,
+                          size: 18, color: Colors.redAccent),
+                      SizedBox(width: 8),
+                      Text('Delete',
+                          style: TextStyle(color: Colors.redAccent)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Embeds the pairing UI (without its own Scaffold/header) and fires
+/// [onPairComplete] when the WebSocket transitions to [ConnectionStatus.paired].
+class _EmbeddedPairing extends StatefulWidget {
+  final VoidCallback onPairComplete;
+  const _EmbeddedPairing({required this.onPairComplete});
+
+  @override
+  State<_EmbeddedPairing> createState() => _EmbeddedPairingState();
+}
+
+class _EmbeddedPairingState extends State<_EmbeddedPairing> {
+  ConnectionStatus? _prevStatus;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = context.watch<WebSocketService>();
+
+    // Detect the moment the status transitions TO paired so we can fire the
+    // callback exactly once — even across multiple builds.
+    if (_prevStatus != null &&
+        _prevStatus != ConnectionStatus.paired &&
+        ws.status == ConnectionStatus.paired) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => widget.onPairComplete());
+    }
+    _prevStatus = ws.status;
+
+    return Container(
+      height: 420,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(16),
+        border:
+            Border.all(color: Colors.white.withValues(alpha: 0.05)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: const PairingScreen(disableAutoNavigate: true),
+    );
   }
 }

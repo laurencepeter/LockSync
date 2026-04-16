@@ -2,6 +2,79 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+/// A saved developer test-profile representing a complete paired session.
+/// The developer can accumulate many profiles (one per test partner) and
+/// switch the active connection between them from the Developer screen.
+class DevProfile {
+  final String id;
+
+  /// Human-readable label — defaults to the partner's display name.
+  String label;
+
+  final String accessToken;
+  final String refreshToken;
+  final String pairId;
+  final String partnerId;
+
+  /// My display name sent to this partner.
+  String? myDisplayName;
+
+  /// Last known display name sent by the partner.
+  String? partnerDisplayName;
+
+  /// Cached canvas JSON so the SyncScreen can show content immediately
+  /// after switching to this profile (before the live sync arrives).
+  String? canvasState;
+
+  /// Last known partner mood emoji.
+  String? partnerMood;
+
+  /// Last known partner text.
+  String? partnerText;
+
+  DevProfile({
+    required this.id,
+    required this.label,
+    required this.accessToken,
+    required this.refreshToken,
+    required this.pairId,
+    required this.partnerId,
+    this.myDisplayName,
+    this.partnerDisplayName,
+    this.canvasState,
+    this.partnerMood,
+    this.partnerText,
+  });
+
+  factory DevProfile.fromJson(Map<String, dynamic> j) => DevProfile(
+        id: j['id'] as String,
+        label: j['label'] as String,
+        accessToken: j['accessToken'] as String,
+        refreshToken: j['refreshToken'] as String? ?? '',
+        pairId: j['pairId'] as String,
+        partnerId: j['partnerId'] as String,
+        myDisplayName: j['myDisplayName'] as String?,
+        partnerDisplayName: j['partnerDisplayName'] as String?,
+        canvasState: j['canvasState'] as String?,
+        partnerMood: j['partnerMood'] as String?,
+        partnerText: j['partnerText'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': label,
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+        'pairId': pairId,
+        'partnerId': partnerId,
+        'myDisplayName': myDisplayName,
+        'partnerDisplayName': partnerDisplayName,
+        'canvasState': canvasState,
+        'partnerMood': partnerMood,
+        'partnerText': partnerText,
+      };
+}
+
 class StorageService {
   static const _keyDeviceId = 'locksync_device_id';
   static const _keyAccessToken = 'locksync_access_token';
@@ -29,6 +102,8 @@ class StorageService {
   static const _keyCountdowns = 'locksync_countdowns';
   static const _keyMoments = 'locksync_moments';
   static const _keyScreenshotDevMode = 'locksync_screenshot_dev_mode';
+  static const _keyDevProfiles = 'locksync_dev_profiles';
+  static const _keyActiveDevProfileId = 'locksync_active_dev_profile_id';
 
   late SharedPreferences _prefs;
 
@@ -236,6 +311,49 @@ class StorageService {
   Future<void> setMoments(List<Map<String, dynamic>> list) async {
     await _prefs.setString(_keyMoments, jsonEncode(list));
   }
+
+  // ─── Developer multi-profile ──────────────────────────────────────────────
+
+  /// The ID of the currently-active dev profile, or null when not in dev mode.
+  String? get activeDevProfileId =>
+      _prefs.getString(_keyActiveDevProfileId);
+
+  Future<void> setActiveDevProfileId(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_keyActiveDevProfileId);
+    } else {
+      await _prefs.setString(_keyActiveDevProfileId, id);
+    }
+  }
+
+  List<DevProfile> getDevProfiles() {
+    final raw = _prefs.getString(_keyDevProfiles);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List)
+        .map((e) => DevProfile.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> saveDevProfile(DevProfile profile) async {
+    final list = getDevProfiles();
+    final idx = list.indexWhere((p) => p.id == profile.id);
+    if (idx >= 0) {
+      list[idx] = profile;
+    } else {
+      list.add(profile);
+    }
+    await _prefs.setString(
+        _keyDevProfiles, jsonEncode(list.map((p) => p.toJson()).toList()));
+  }
+
+  Future<void> deleteDevProfile(String id) async {
+    final list = getDevProfiles()..removeWhere((p) => p.id == id);
+    await _prefs.setString(
+        _keyDevProfiles, jsonEncode(list.map((p) => p.toJson()).toList()));
+    if (activeDevProfileId == id) await setActiveDevProfileId(null);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
 
   Future<void> saveSession({
     required String accessToken,

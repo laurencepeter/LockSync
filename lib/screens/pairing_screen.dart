@@ -139,6 +139,19 @@ class _PairingScreenState extends State<PairingScreen>
           .addPostFrameCallback((_) => _navigateToDisplayName());
     }
 
+    // When embedded inside DeveloperScreen (disableAutoNavigate = true), skip
+    // the Scaffold/AnimatedGradientBg/SafeArea wrapper and the header row.
+    // Rendering a nested Scaffold with its own background and a duplicate back
+    // button caused the DeveloperScreen to "disappear" — the embedded
+    // PairingScreen's back button popped the DeveloperScreen route instead of
+    // doing nothing, and its gradient background painted over the dev UI.
+    if (widget.disableAutoNavigate) {
+      return FadeTransition(
+        opacity: CurvedAnimation(parent: _enterAnim, curve: Curves.easeOut),
+        child: _buildBody(context, ws),
+      );
+    }
+
     return Scaffold(
       body: AnimatedGradientBg(
         child: SafeArea(
@@ -155,99 +168,107 @@ class _PairingScreenState extends State<PairingScreen>
                 parent: _enterAnim,
                 curve: Curves.easeOutCubic,
               )),
-              child: Column(
-                children: [
-                  // Header
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        const Spacer(),
-                        Text(
-                          'Pair Devices',
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        const Spacer(),
-                        const SizedBox(width: 48),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Tab bar
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: TabBar(
-                      controller: _tabController,
-                      indicator: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        color: LockSyncTheme.primaryColor,
-                      ),
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      dividerColor: Colors.transparent,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white54,
-                      labelStyle: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                      tabs: const [
-                        Tab(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.qr_code_rounded, size: 18),
-                              SizedBox(width: 8),
-                              Text('Share Code'),
-                            ],
-                          ),
-                        ),
-                        Tab(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.dialpad_rounded, size: 18),
-                              SizedBox(width: 8),
-                              Text('Enter Code'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Error banner
-                  if (ws.errorMessage != null)
-                    _buildErrorBanner(context, ws),
-
-                  // Tab content
-                  Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildShareCodeTab(context, ws),
-                        _buildEnterCodeTab(context, ws),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+              child: _buildBody(context, ws),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// Shared column content: optional header + tab bar + tab views.
+  /// The header is shown only when PairingScreen is used as a standalone
+  /// route (disableAutoNavigate = false).
+  Widget _buildBody(BuildContext context, WebSocketService ws) {
+    return Column(
+      children: [
+        // Header — only shown in standalone (non-embedded) mode.
+        if (!widget.disableAutoNavigate)
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                const Spacer(),
+                Text(
+                  'Pair Devices',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const Spacer(),
+                const SizedBox(width: 48),
+              ],
+            ),
+          ),
+
+        const SizedBox(height: 8),
+
+        // Tab bar
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 32),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: LockSyncTheme.primaryColor,
+            ),
+            indicatorSize: TabBarIndicatorSize.tab,
+            dividerColor: Colors.transparent,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white54,
+            labelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+            tabs: const [
+              Tab(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.qr_code_rounded, size: 18),
+                    SizedBox(width: 8),
+                    Text('Share Code'),
+                  ],
+                ),
+              ),
+              Tab(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.dialpad_rounded, size: 18),
+                    SizedBox(width: 8),
+                    Text('Enter Code'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
+        // Error banner
+        if (ws.errorMessage != null)
+          _buildErrorBanner(context, ws),
+
+        // Tab content
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildShareCodeTab(context, ws),
+              _buildEnterCodeTab(context, ws),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
