@@ -12,7 +12,6 @@ import '../services/wallpaper_service.dart';
 import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import 'canvas_screen.dart';
-import 'developer_screen.dart';
 import 'moments_screen.dart';
 import 'settings_screen.dart';
 import 'welcome_screen.dart';
@@ -509,10 +508,6 @@ class _SyncScreenState extends State<SyncScreen>
                         ],
                       ),
                     ),
-
-                    // Dev mode active-partner banner
-                    if (ws.activeDevProfileId != null)
-                      _DevPartnerBanner(ws: ws),
 
                     // Reconnecting overlay
                     if (ws.isReconnecting)
@@ -1704,64 +1699,3 @@ class _FloatingReactionWidgetState extends State<_FloatingReactionWidget>
   }
 }
 
-// ─── Dev Mode Active-Partner Banner ─────────────────────────────────
-/// Shown in SyncScreen when a dev profile is active. Tapping opens the
-/// Developer screen so the user can switch to a different test partner.
-class _DevPartnerBanner extends StatelessWidget {
-  final WebSocketService ws;
-  const _DevPartnerBanner({required this.ws});
-
-  @override
-  Widget build(BuildContext context) {
-    final profiles = ws.devProfiles;
-    final activeId = ws.activeDevProfileId;
-    final activeProfile = activeId == null
-        ? null
-        : profiles.where((p) => p.id == activeId).firstOrNull;
-    final label = activeProfile?.label ?? 'Dev Profile';
-    final idx = activeProfile == null ? 0 : profiles.indexOf(activeProfile);
-
-    return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const DeveloperScreen()),
-      ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
-        color: Colors.orange.withValues(alpha: 0.10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.code_rounded, size: 13, color: Colors.orange),
-            const SizedBox(width: 6),
-            Text(
-              'DEV — $label',
-              style: const TextStyle(
-                color: Colors.orange,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.5,
-              ),
-            ),
-            if (profiles.length > 1) ...[
-              const SizedBox(width: 6),
-              Text(
-                '${idx + 1}/${profiles.length}',
-                style: TextStyle(
-                  color: Colors.orange.withValues(alpha: 0.6),
-                  fontSize: 11,
-                ),
-              ),
-            ],
-            const SizedBox(width: 6),
-            Icon(
-              Icons.swap_horiz_rounded,
-              size: 13,
-              color: Colors.orange.withValues(alpha: 0.7),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
