@@ -228,6 +228,18 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
+                    // ── Partner Switcher (shown when profiles exist) ───
+                    if (profiles.isNotEmpty) ...[
+                      _SectionHeader(title: 'ACTIVE PARTNER'),
+                      _PartnerSwitcherCard(
+                        profiles: profiles,
+                        activeId: activeId,
+                        switchingId: _switchingProfileId,
+                        onSwitch: (p) => _activateProfile(ws, p),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+
                     // ── Dev-only settings ──────────────────────────────
                     _SectionHeader(title: 'SETTINGS'),
                     Container(
@@ -460,124 +472,274 @@ class _ProfileTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: isActive
-            ? LockSyncTheme.primaryColor.withValues(alpha: 0.12)
-            : Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
+    return GestureDetector(
+      onTap: isActive || isSwitching ? null : onActivate,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
           color: isActive
-              ? LockSyncTheme.primaryColor.withValues(alpha: 0.4)
-              : Colors.white.withValues(alpha: 0.05),
+              ? LockSyncTheme.primaryColor.withValues(alpha: 0.12)
+              : Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isActive
+                ? LockSyncTheme.primaryColor.withValues(alpha: 0.4)
+                : Colors.white.withValues(alpha: 0.05),
+          ),
+        ),
+        child: Row(
+          children: [
+            // Active indicator dot
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isActive ? Colors.greenAccent : Colors.white24,
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // Profile info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    profile.label,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500),
+                  ),
+                  if (profile.partnerDisplayName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Partner: ${profile.partnerDisplayName}',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 2),
+                  Text(
+                    'Pair ID: ${profile.pairId.length > 12 ? '${profile.pairId.substring(0, 12)}…' : profile.pairId}',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.3),
+                        fontSize: 11,
+                        fontFamily: 'monospace'),
+                  ),
+                ],
+              ),
+            ),
+
+            // Actions
+            if (isSwitching)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else ...[
+              if (!isActive)
+                TextButton(
+                  onPressed: onActivate,
+                  style: TextButton.styleFrom(
+                    foregroundColor: LockSyncTheme.primaryColor,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Activate',
+                      style:
+                          TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert_rounded,
+                    color: Colors.white38, size: 20),
+                color: const Color(0xFF1A1A2E),
+                onSelected: (v) {
+                  if (v == 'rename') onRename();
+                  if (v == 'delete') onDelete();
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'rename',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_rounded, size: 18, color: Colors.white70),
+                        SizedBox(width: 8),
+                        Text('Rename',
+                            style: TextStyle(color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline_rounded,
+                            size: 18, color: Colors.redAccent),
+                        SizedBox(width: 8),
+                        Text('Delete',
+                            style: TextStyle(color: Colors.redAccent)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Carousel card showing the currently-active partner with prev/next arrows.
+/// Allows quick cycling through all saved profiles without scrolling.
+class _PartnerSwitcherCard extends StatelessWidget {
+  final List<DevProfile> profiles;
+  final String? activeId;
+  final String? switchingId;
+  final void Function(DevProfile) onSwitch;
+
+  const _PartnerSwitcherCard({
+    required this.profiles,
+    required this.activeId,
+    required this.switchingId,
+    required this.onSwitch,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final activeIdx = activeId == null
+        ? -1
+        : profiles.indexWhere((p) => p.id == activeId);
+    final hasActive = activeIdx >= 0;
+    final current = hasActive ? profiles[activeIdx] : null;
+
+    final prevIdx = profiles.isEmpty
+        ? -1
+        : activeIdx <= 0
+            ? profiles.length - 1
+            : activeIdx - 1;
+    final nextIdx = profiles.isEmpty
+        ? -1
+        : activeIdx < 0 || activeIdx >= profiles.length - 1
+            ? 0
+            : activeIdx + 1;
+
+    final isSwitching = switchingId != null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      decoration: BoxDecoration(
+        color: LockSyncTheme.primaryColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: LockSyncTheme.primaryColor.withValues(alpha: 0.25),
         ),
       ),
       child: Row(
         children: [
-          // Active indicator dot
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isActive ? Colors.greenAccent : Colors.white24,
-            ),
+          // ── Prev arrow ──────────────────────────────────────────────
+          _ArrowButton(
+            icon: Icons.chevron_left_rounded,
+            enabled: !isSwitching && profiles.length > 1,
+            onTap: prevIdx >= 0 ? () => onSwitch(profiles[prevIdx]) : null,
           ),
-          const SizedBox(width: 12),
 
-          // Profile info
+          // ── Active profile display ───────────────────────────────────
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  profile.label,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500),
-                ),
-                if (profile.partnerDisplayName != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    'Partner: ${profile.partnerDisplayName}',
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 12),
+            child: isSwitching
+                ? const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        hasActive ? current!.label : 'None',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (hasActive && current!.partnerDisplayName != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'with ${current.partnerDisplayName}',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 13,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      Text(
+                        profiles.length > 1
+                            ? '${hasActive ? activeIdx + 1 : 0} / ${profiles.length}'
+                            : '1 profile',
+                        style: TextStyle(
+                          color: LockSyncTheme.primaryColor.withValues(alpha: 0.6),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-                const SizedBox(height: 2),
-                Text(
-                  'Pair ID: ${profile.pairId.length > 12 ? '${profile.pairId.substring(0, 12)}…' : profile.pairId}',
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.3),
-                      fontSize: 11,
-                      fontFamily: 'monospace'),
-                ),
-              ],
-            ),
           ),
 
-          // Actions
-          if (isSwitching)
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else ...[
-            if (!isActive)
-              TextButton(
-                onPressed: onActivate,
-                style: TextButton.styleFrom(
-                  foregroundColor: LockSyncTheme.primaryColor,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text('Activate',
-                    style:
-                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              ),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert_rounded,
-                  color: Colors.white38, size: 20),
-              color: const Color(0xFF1A1A2E),
-              onSelected: (v) {
-                if (v == 'rename') onRename();
-                if (v == 'delete') onDelete();
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'rename',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit_rounded, size: 18, color: Colors.white70),
-                      SizedBox(width: 8),
-                      Text('Rename',
-                          style: TextStyle(color: Colors.white70)),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline_rounded,
-                          size: 18, color: Colors.redAccent),
-                      SizedBox(width: 8),
-                      Text('Delete',
-                          style: TextStyle(color: Colors.redAccent)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
+          // ── Next arrow ──────────────────────────────────────────────
+          _ArrowButton(
+            icon: Icons.chevron_right_rounded,
+            enabled: !isSwitching && profiles.length > 1,
+            onTap: nextIdx >= 0 ? () => onSwitch(profiles[nextIdx]) : null,
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _ArrowButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _ArrowButton({
+    required this.icon,
+    required this.enabled,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 48,
+        height: 64,
+        alignment: Alignment.center,
+        child: Icon(
+          icon,
+          size: 32,
+          color: enabled
+              ? Colors.white.withValues(alpha: 0.8)
+              : Colors.white.withValues(alpha: 0.15),
+        ),
       ),
     );
   }
