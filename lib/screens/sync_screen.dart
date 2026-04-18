@@ -1698,3 +1698,4 @@ class _FloatingReactionWidgetState extends State<_FloatingReactionWidget>
     );
   }
 }
+
