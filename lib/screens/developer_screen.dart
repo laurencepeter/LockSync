@@ -11,6 +11,8 @@
 ///     regular Settings screen.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -756,21 +758,32 @@ class _EmbeddedPairing extends StatefulWidget {
 }
 
 class _EmbeddedPairingState extends State<_EmbeddedPairing> {
-  ConnectionStatus? _prevStatus;
+  StreamSubscription<void>? _pairingSub;
+
+  @override
+  void initState() {
+    super.initState();
+    final ws = context.read<WebSocketService>();
+    // Listen to the dedicated "new pairing" stream so we fire exactly once
+    // per completed pairing — even when the device was already in "paired"
+    // status before the developer re-paired with a second test account.
+    _pairingSub = ws.onNewPairing.listen((_) {
+      if (mounted) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => widget.onPairComplete());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pairingSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final ws = context.watch<WebSocketService>();
-
-    // Detect the moment the status transitions TO paired so we can fire the
-    // callback exactly once — even across multiple builds.
-    if (_prevStatus != null &&
-        _prevStatus != ConnectionStatus.paired &&
-        ws.status == ConnectionStatus.paired) {
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => widget.onPairComplete());
-    }
-    _prevStatus = ws.status;
+    context.watch<WebSocketService>(); // keep widget in the rebuild tree
 
     return Container(
       height: 420,

@@ -662,14 +662,10 @@ class _MomentViewerScreenState extends State<MomentViewerScreen> {
   bool _started = false;
   File? _videoFile;
 
-  Uint8List? get _imageBytes {
-    if (widget.moment.isVideo) return null;
-    try {
-      return base64Decode(widget.moment.data);
-    } catch (_) {
-      return null;
-    }
-  }
+  // Decoded once in initState so Image.memory reuses the same Uint8List
+  // instance every rebuild — prevents the frame-flicker caused by decoding
+  // fresh bytes on every 1-second setState.
+  Uint8List? _imageBytes;
 
   @override
   void initState() {
@@ -677,6 +673,10 @@ class _MomentViewerScreenState extends State<MomentViewerScreen> {
     _remaining = widget.moment.viewDuration;
     if (widget.moment.isVideo) {
       _initVideo();
+    } else {
+      try {
+        _imageBytes = base64Decode(widget.moment.data);
+      } catch (_) {}
     }
     if (Platform.isAndroid && !widget.screenshotDevMode) {
       _channel.invokeMethod('setSecureFlag', {'secure': true});
@@ -840,10 +840,10 @@ class _CountdownBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fraction = started ? (remaining / total).clamp(0.0, 1.0) : 1.0;
-    final color = fraction > 0.5
+    final targetFraction = started ? (remaining / total).clamp(0.0, 1.0) : 1.0;
+    final color = targetFraction > 0.5
         ? Colors.green
-        : fraction > 0.25
+        : targetFraction > 0.25
             ? Colors.amber
             : Colors.red;
 
@@ -852,11 +852,19 @@ class _CountdownBar extends StatelessWidget {
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: fraction,
-            backgroundColor: Colors.white24,
-            valueColor: AlwaysStoppedAnimation(color),
-            minHeight: 6,
+          // TweenAnimationBuilder smoothly slides the bar each second instead
+          // of jumping, eliminating the visible stutter. begin: null lets the
+          // builder use the current animated value as the start of each new
+          // transition so there is never a discontinuous jump.
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: targetFraction),
+            duration: const Duration(milliseconds: 900),
+            builder: (_, animFraction, __) => LinearProgressIndicator(
+              value: animFraction,
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation(color),
+              minHeight: 6,
+            ),
           ),
         ),
         const SizedBox(height: 4),

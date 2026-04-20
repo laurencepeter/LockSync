@@ -206,6 +206,15 @@ class _PairingScreenState extends State<PairingScreen>
 
         const SizedBox(height: 8),
 
+        // Pair mode selector — only on the standalone pairing screen
+        if (!widget.disableAutoNavigate) ...[
+          _PairModeSelector(
+            selected: ws.pairMode,
+            onSelect: (mode) => ws.setPairMode(mode),
+          ),
+          const SizedBox(height: 16),
+        ],
+
         // Tab bar
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 32),
@@ -304,6 +313,7 @@ class _PairingScreenState extends State<PairingScreen>
 
   Widget _buildShareCodeTab(BuildContext context, WebSocketService ws) {
     final code = ws.pairingCode;
+    final isTravel = ws.pairMode == 'travel';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -311,7 +321,7 @@ class _PairingScreenState extends State<PairingScreen>
         children: [
           const SizedBox(height: 16),
           Text(
-            'Show this code to your partner',
+            isTravel ? 'Share this code with your travel group' : 'Show this code to your partner',
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 32),
@@ -396,7 +406,9 @@ class _PairingScreenState extends State<PairingScreen>
 
           const SizedBox(height: 24),
           Text(
-            'Your partner enters this code on their device\nor scans the QR code to complete pairing',
+            isTravel
+                ? 'Each travel companion enters this code on their device\nor scans the QR code to join the trip'
+                : 'Your partner enters this code on their device\nor scans the QR code to complete pairing',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.white38,
@@ -408,13 +420,15 @@ class _PairingScreenState extends State<PairingScreen>
   }
 
   Widget _buildEnterCodeTab(BuildContext context, WebSocketService ws) {
+    final isTravel = ws.pairMode == 'travel';
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
         children: [
           const SizedBox(height: 16),
           Text(
-            'Enter your partner\'s 6-digit code',
+            isTravel ? 'Enter the organiser\'s 6-digit code' : 'Enter your partner\'s 6-digit code',
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 24),
@@ -542,7 +556,7 @@ class _PairingScreenState extends State<PairingScreen>
                         ),
                         const SizedBox(width: 10),
                         Text(
-                          'Waiting for partner...',
+                          isTravel ? 'Waiting for travel companion...' : 'Waiting for partner...',
                           style: TextStyle(
                             color: LockSyncTheme.accentColor
                                 .withValues(alpha: 0.6),
@@ -556,7 +570,9 @@ class _PairingScreenState extends State<PairingScreen>
           ),
 
           Text(
-            'Ask your partner to generate a code\non their device, then enter it here',
+            isTravel
+                ? 'Ask the trip organiser to generate a code\non their device, then enter it here'
+                : 'Ask your partner to generate a code\non their device, then enter it here',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.white38,
@@ -634,6 +650,130 @@ class _AnimatedCodeDisplay extends StatelessWidget {
             }),
           );
         },
+      ),
+    );
+  }
+}
+
+// ─── Pair mode selector ─────────────────────────────────────────────────────
+class _PairModeSelector extends StatelessWidget {
+  final String selected;
+  final void Function(String) onSelect;
+
+  const _PairModeSelector({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Choose your pairing mode',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.5),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _ModeCard(
+                  mode: 'couple',
+                  icon: Icons.favorite_rounded,
+                  label: 'Couple',
+                  description: 'Just the two of you',
+                  isSelected: selected == 'couple',
+                  onTap: () => onSelect('couple'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ModeCard(
+                  mode: 'travel',
+                  icon: Icons.flight_rounded,
+                  label: 'Travel / Party',
+                  description: 'Group trip & itinerary',
+                  isSelected: selected == 'travel',
+                  onTap: () => onSelect('travel'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ModeCard extends StatelessWidget {
+  final String mode;
+  final IconData icon;
+  final String label;
+  final String description;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ModeCard({
+    required this.mode,
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = mode == 'travel' ? const Color(0xFF00B4D8) : LockSyncTheme.primaryColor;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? accent.withValues(alpha: 0.15)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? accent.withValues(alpha: 0.6)
+                : Colors.white.withValues(alpha: 0.08),
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon,
+                size: 22,
+                color: isSelected ? accent : Colors.white38),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.white60,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              description,
+              style: TextStyle(
+                color: isSelected
+                    ? Colors.white.withValues(alpha: 0.55)
+                    : Colors.white.withValues(alpha: 0.3),
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

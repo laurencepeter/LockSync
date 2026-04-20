@@ -2,6 +2,77 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+// ─── TravelGroup ─────────────────────────────────────────────────────────────
+
+/// A travel/party group that any number of devices can join via a shared code.
+/// Groups are independent of couple pairings — a device may belong to both.
+class TravelGroup {
+  final String id;       // groupId assigned by the server
+  String name;
+  final String accessToken;
+  final String refreshToken;
+  final bool isHost;
+
+  /// Display names of known group members, keyed by their deviceId.
+  Map<String, String> memberDisplayNames;
+
+  /// Shared itinerary entries: [{ 'id', 'text', 'done', 'addedBy' }, ...]
+  List<Map<String, dynamic>> itinerary;
+
+  /// Shared packing / to-do items: [{ 'id', 'text', 'done', 'addedBy' }, ...]
+  List<Map<String, dynamic>> packingList;
+
+  /// Host announcements shown to all members.
+  List<Map<String, dynamic>> announcements;
+
+  TravelGroup({
+    required this.id,
+    required this.name,
+    required this.accessToken,
+    required this.refreshToken,
+    required this.isHost,
+    Map<String, String>? memberDisplayNames,
+    List<Map<String, dynamic>>? itinerary,
+    List<Map<String, dynamic>>? packingList,
+    List<Map<String, dynamic>>? announcements,
+  })  : memberDisplayNames = memberDisplayNames ?? {},
+        itinerary = itinerary ?? [],
+        packingList = packingList ?? [],
+        announcements = announcements ?? [];
+
+  factory TravelGroup.fromJson(Map<String, dynamic> j) => TravelGroup(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        accessToken: j['accessToken'] as String,
+        refreshToken: j['refreshToken'] as String? ?? '',
+        isHost: j['isHost'] as bool? ?? false,
+        memberDisplayNames: (j['memberDisplayNames'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as String)) ??
+            {},
+        itinerary: (j['itinerary'] as List?)
+                ?.cast<Map<String, dynamic>>() ??
+            [],
+        packingList: (j['packingList'] as List?)
+                ?.cast<Map<String, dynamic>>() ??
+            [],
+        announcements: (j['announcements'] as List?)
+                ?.cast<Map<String, dynamic>>() ??
+            [],
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+        'isHost': isHost,
+        'memberDisplayNames': memberDisplayNames,
+        'itinerary': itinerary,
+        'packingList': packingList,
+        'announcements': announcements,
+      };
+}
+
 /// A saved developer test-profile representing a complete paired session.
 /// The developer can accumulate many profiles (one per test partner) and
 /// switch the active connection between them from the Developer screen.
@@ -101,9 +172,11 @@ class StorageService {
   static const _keyReminders = 'locksync_reminders';
   static const _keyCountdowns = 'locksync_countdowns';
   static const _keyMoments = 'locksync_moments';
+  static const _keyTravelGroups = 'locksync_travel_groups';
   static const _keyScreenshotDevMode = 'locksync_screenshot_dev_mode';
   static const _keyDevProfiles = 'locksync_dev_profiles';
   static const _keyActiveDevProfileId = 'locksync_active_dev_profile_id';
+  static const _keyPairMode = 'locksync_pair_mode';
 
   late SharedPreferences _prefs;
 
@@ -301,6 +374,12 @@ class StorageService {
     await _prefs.setBool(_keyScreenshotDevMode, value);
   }
 
+  // Pair mode: 'couple' (default) or 'travel'
+  String get pairMode => _prefs.getString(_keyPairMode) ?? 'couple';
+  Future<void> setPairMode(String mode) async {
+    await _prefs.setString(_keyPairMode, mode);
+  }
+
   // Moments (received image/video moments with view-count tracking)
   List<Map<String, dynamic>> getMoments() {
     final raw = _prefs.getString(_keyMoments);
@@ -381,5 +460,33 @@ class StorageService {
     await _prefs.remove(_keyPairId);
     await _prefs.remove(_keyPartnerId);
     await _prefs.remove(_keyPartnerName);
+  }
+
+  // ─── Travel groups ────────────────────────────────────────────────────────
+
+  List<TravelGroup> getTravelGroups() {
+    final raw = _prefs.getString(_keyTravelGroups);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List)
+        .map((e) => TravelGroup.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> saveTravelGroup(TravelGroup group) async {
+    final list = getTravelGroups();
+    final idx = list.indexWhere((g) => g.id == group.id);
+    if (idx >= 0) {
+      list[idx] = group;
+    } else {
+      list.add(group);
+    }
+    await _prefs.setString(
+        _keyTravelGroups, jsonEncode(list.map((g) => g.toJson()).toList()));
+  }
+
+  Future<void> deleteTravelGroup(String id) async {
+    final list = getTravelGroups()..removeWhere((g) => g.id == id);
+    await _prefs.setString(
+        _keyTravelGroups, jsonEncode(list.map((g) => g.toJson()).toList()));
   }
 }
