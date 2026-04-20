@@ -14,6 +14,7 @@ import '../widgets/animated_gradient_bg.dart';
 import 'canvas_screen.dart';
 import 'moments_screen.dart';
 import 'settings_screen.dart';
+import 'travel_group_screen.dart';
 import 'welcome_screen.dart';
 import 'widgets_screen.dart';
 
@@ -492,6 +493,19 @@ class _SyncScreenState extends State<SyncScreen>
                                 ?.copyWith(fontSize: 18),
                           ),
                           const Spacer(),
+                          // Travel groups
+                          IconButton(
+                            icon: const Icon(Icons.flight_rounded, size: 22),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        const TravelGroupScreen()),
+                              );
+                            },
+                            tooltip: 'Travel Groups',
+                          ),
                           // Settings
                           IconButton(
                             icon:

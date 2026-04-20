@@ -85,6 +85,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   final _newPairingController = StreamController<void>.broadcast();
   Stream<void> get onNewPairing => _newPairingController.stream;
 
+  // Group sync stream — carries { groupId, syncType, ...payload } updates
+  final _groupSyncController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get onGroupSync => _groupSyncController.stream;
+
   ConnectionStatus get status => _status;
   String? get pairingCode => _pairingCode;
   String? get pairId => _pairId;
@@ -304,6 +309,13 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       if (storage.isPaired) {
         authenticate();
       }
+      // Re-authenticate for every saved travel group so group sync resumes.
+      for (final group in storage.getTravelGroups()) {
+        _send({
+          'type': 'group_authenticate',
+          'token': group.accessToken,
+        });
+      }
     } catch (e) {
       debugPrint('[WS] Connect failed: $e');
       // Reset to a state that _handleDisconnect can process
@@ -411,6 +423,23 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
         break;
 
       case 'pong':
+        break;
+
+      // ── Group messages ──────────────────────────────────────────────
+      case 'group_created':
+      case 'group_joined':
+        _handleGroupFormed(msg);
+        break;
+      case 'group_authenticated':
+        _handleGroupAuthenticated(msg);
+        break;
+      case 'group_sync':
+        _handleGroupSyncMessage(msg);
+        break;
+      case 'group_member_joined':
+      case 'group_member_online':
+      case 'group_member_offline':
+        _handleGroupMemberEvent(msg);
         break;
 
       case 'error':
@@ -953,6 +982,138 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
+  // ─── Travel groups ────────────────────────────────────────────────────────
+
+  List<TravelGroup> get travelGroups => storage.getTravelGroups();
+
+  /// Ask the server to create a new group and issue credentials.
+  void createTravelGroup(String name) {
+    _send({
+      'type': 'create_group',
+      'deviceId': storage.getDeviceId(),
+      'groupName': name,
+    });
+  }
+
+  /// Ask the server to add this device to an existing group by code.
+  void joinTravelGroup(String code) {
+    _send({
+      'type': 'join_group',
+      'deviceId': storage.getDeviceId(),
+      'code': code,
+    });
+  }
+
+  /// Broadcast a sync payload to all members of [groupId].
+  void sendGroupSync(String groupId, Map<String, dynamic> payload) {
+    _send({'type': 'group_sync', 'groupId': groupId, 'payload': payload});
+  }
+
+  Future<void> deleteTravelGroup(String groupId) async {
+    await storage.deleteTravelGroup(groupId);
+    notifyListeners();
+  }
+
+  // ─── Group message handlers ───────────────────────────────────────────────
+
+  void _handleGroupFormed(Map<String, dynamic> msg) {
+    final groupId = msg['groupId'] as String?;
+    final groupName = msg['groupName'] as String? ?? 'Travel Group';
+    final isHost = msg['isHost'] as bool? ?? false;
+    final accessToken = (msg['groupAccessToken'] as String?) ?? '';
+    final refreshToken = (msg['groupRefreshToken'] as String?) ?? '';
+
+    if (groupId == null || accessToken.isEmpty) return;
+
+    final group = TravelGroup(
+      id: groupId,
+      name: groupName,
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      isHost: isHost,
+    );
+    storage.saveTravelGroup(group);
+    notifyListeners();
+    // Broadcast our display name to new group members right away.
+    final name = storage.displayName;
+    if (name != null && name.isNotEmpty) {
+      sendGroupSync(groupId, {
+        'syncType': 'display_name',
+        'displayName': name,
+      });
+    }
+  }
+
+  void _handleGroupAuthenticated(Map<String, dynamic> msg) {
+    final groupId = msg['groupId'] as String?;
+    final groupName = msg['groupName'] as String?;
+    if (groupId == null) return;
+    final groups = storage.getTravelGroups();
+    final idx = groups.indexWhere((g) => g.id == groupId);
+    if (idx >= 0) {
+      if (groupName != null) groups[idx].name = groupName;
+      storage.saveTravelGroup(groups[idx]);
+      notifyListeners();
+    }
+  }
+
+  void _handleGroupSyncMessage(Map<String, dynamic> msg) {
+    final groupId = msg['groupId'] as String?;
+    final payload = msg['payload'] as Map<String, dynamic>?;
+    if (groupId == null || payload == null) return;
+
+    final groups = storage.getTravelGroups();
+    final idx = groups.indexWhere((g) => g.id == groupId);
+    if (idx < 0) return;
+    final group = groups[idx];
+    final from = msg['from'] as String?;
+    final syncType = payload['syncType'] as String?;
+
+    switch (syncType) {
+      case 'display_name':
+        if (from != null) {
+          final name = payload['displayName'] as String?;
+          if (name != null) {
+            group.memberDisplayNames[from] = name;
+          }
+        }
+      case 'itinerary':
+        final items = payload['items'];
+        if (items is List) {
+          group.itinerary =
+              List<Map<String, dynamic>>.from(items);
+        }
+      case 'packing':
+        final items = payload['items'];
+        if (items is List) {
+          group.packingList =
+              List<Map<String, dynamic>>.from(items);
+        }
+      case 'announcement':
+        final items = payload['items'];
+        if (items is List) {
+          group.announcements =
+              List<Map<String, dynamic>>.from(items);
+        }
+    }
+    storage.saveTravelGroup(group);
+    _groupSyncController.add({...payload, 'groupId': groupId, 'from': from});
+    notifyListeners();
+  }
+
+  void _handleGroupMemberEvent(Map<String, dynamic> msg) {
+    final groupId = msg['groupId'] as String?;
+    if (groupId == null) return;
+    // Just relay to UI via stream; membership list updates come via display_name sync.
+    _groupSyncController.add({
+      'syncType': 'member_event',
+      'event': msg['type'],
+      'groupId': groupId,
+      'deviceId': msg['deviceId'],
+    });
+    notifyListeners();
+  }
+
   void disconnect() {
     _pingTimer?.cancel();
     _reconnectTimer?.cancel();
@@ -982,6 +1143,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _widgetSyncController.close();
     _wallpaperPromptController.close();
     _canvasSyncController.close();
+    _groupSyncController.close();
     // Disconnect WebSocket last
     _channel?.sink.close();
     _channel = null;

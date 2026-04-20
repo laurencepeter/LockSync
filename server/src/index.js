@@ -97,6 +97,27 @@ const lastStateBuffer = new Map();
 /** Nudge rate limit per device: deviceId → lastNudgeTimestamp */
 const nudgeLimits = new Map();
 
+// ─── Group stores ─────────────────────────────────────────────────────
+// Groups support N-way shared content (itinerary, tasks, announcements)
+// for travel parties.  They are independent of couple pairs — a device may
+// belong to both at the same time.
+
+/** pendingGroupCodes: 8-digit code → { groupId, createdAt } */
+const pendingGroupCodes = new Map();
+
+/**
+ * groups: groupId → {
+ *   name: string,
+ *   hostDeviceId: string,
+ *   members: Map<deviceId, { ws, displayName }>,
+ *   createdAt: number,
+ * }
+ */
+const groups = new Map();
+
+// Group code TTL — same as pair codes but noted separately for clarity.
+const GROUP_CODE_TTL = PAIR_CODE_TTL; // 300s default
+
 // ─── HTTP server ─────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
@@ -104,6 +125,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       status: 'ok',
       pairs: activePairs.size,
+      groups: groups.size,
       pendingCodes: pairingCodes.size,
       uptime: process.uptime(),
     }));
@@ -177,6 +199,19 @@ wss.on('connection', (ws, req) => {
         break;
       case 'sync':
         handleSync(ws, msg);
+        break;
+      // ── Group messages ──────────────────────────────────────────────
+      case 'create_group':
+        handleCreateGroup(ws, msg);
+        break;
+      case 'join_group':
+        handleJoinGroup(ws, msg, ip);
+        break;
+      case 'group_authenticate':
+        handleGroupAuthenticate(ws, msg);
+        break;
+      case 'group_sync':
+        handleGroupSync(ws, msg);
         break;
       case 'ping':
         send(ws, { type: 'pong', ts: Date.now() });
@@ -499,29 +534,284 @@ function handleSync(ws, msg) {
   });
 }
 
+// ─── Groups: create ──────────────────────────────────────────────────
+function handleCreateGroup(ws, msg) {
+  const { deviceId, groupName } = msg;
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.length < 8) {
+    sendError(ws, 'INVALID_DEVICE_ID', 'Provide a valid deviceId');
+    return;
+  }
+
+  const name = typeof groupName === 'string' && groupName.trim()
+    ? groupName.trim().substring(0, 60)
+    : 'Travel Group';
+
+  const groupId = uuidv4();
+  const code = generateGroupCode();
+
+  groups.set(groupId, {
+    name,
+    hostDeviceId: deviceId,
+    members: new Map([[deviceId, { ws, displayName: null }]]),
+    createdAt: Date.now(),
+  });
+
+  pendingGroupCodes.set(code, { groupId, createdAt: Date.now() });
+
+  // Expire the group code after TTL
+  setTimeout(() => {
+    if (pendingGroupCodes.has(code) &&
+        pendingGroupCodes.get(code).groupId === groupId) {
+      pendingGroupCodes.delete(code);
+    }
+  }, GROUP_CODE_TTL * 1000);
+
+  ws._groupIds = ws._groupIds || new Set();
+  ws._groupIds.add(groupId);
+  ws._deviceId = ws._deviceId || deviceId;
+
+  const tokens = issueGroupTokens(deviceId, groupId);
+
+  send(ws, {
+    type: 'group_created',
+    groupId,
+    groupName: name,
+    code,
+    expiresIn: GROUP_CODE_TTL,
+    isHost: true,
+    memberCount: 1,
+    ...tokens,
+  });
+
+  console.log(`[GROUP] "${name}" (${groupId.slice(0, 8)}…) created by ${deviceId.slice(0, 8)}… code=${code}`);
+}
+
+// ─── Groups: join ────────────────────────────────────────────────────
+function handleJoinGroup(ws, msg, ip) {
+  if (!checkRateLimit(ip)) {
+    sendError(ws, 'RATE_LIMITED', 'Too many attempts. Try again later.');
+    return;
+  }
+
+  const { deviceId, code } = msg;
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.length < 8 ||
+      !code || typeof code !== 'string') {
+    sendError(ws, 'INVALID_REQUEST', 'Provide deviceId and code');
+    return;
+  }
+
+  const entry = pendingGroupCodes.get(code);
+  if (!entry) {
+    sendError(ws, 'INVALID_CODE', 'Group code not found or expired');
+    return;
+  }
+  if (Date.now() - entry.createdAt > GROUP_CODE_TTL * 1000) {
+    pendingGroupCodes.delete(code);
+    sendError(ws, 'CODE_EXPIRED', 'Group code has expired');
+    return;
+  }
+
+  const group = groups.get(entry.groupId);
+  if (!group) {
+    pendingGroupCodes.delete(code);
+    sendError(ws, 'GROUP_NOT_FOUND', 'Group no longer exists');
+    return;
+  }
+
+  if (group.members.has(deviceId)) {
+    sendError(ws, 'ALREADY_IN_GROUP', 'Already a member of this group');
+    return;
+  }
+
+  group.members.set(deviceId, { ws, displayName: null });
+
+  ws._groupIds = ws._groupIds || new Set();
+  ws._groupIds.add(entry.groupId);
+  ws._deviceId = ws._deviceId || deviceId;
+
+  const tokens = issueGroupTokens(deviceId, entry.groupId);
+
+  // Notify existing members
+  for (const [memberId, member] of group.members) {
+    if (memberId !== deviceId && member.ws?.readyState === 1) {
+      send(member.ws, {
+        type: 'group_member_joined',
+        groupId: entry.groupId,
+        deviceId,
+        memberCount: group.members.size,
+      });
+    }
+  }
+
+  send(ws, {
+    type: 'group_joined',
+    groupId: entry.groupId,
+    groupName: group.name,
+    memberCount: group.members.size,
+    isHost: false,
+    ...tokens,
+  });
+
+  console.log(`[GROUP] ${deviceId.slice(0, 8)}… joined "${group.name}" (${entry.groupId.slice(0, 8)}…), members=${group.members.size}`);
+}
+
+// ─── Groups: re-authenticate after reconnect ─────────────────────────
+function handleGroupAuthenticate(ws, msg) {
+  const { token } = msg;
+  if (!token) {
+    sendError(ws, 'MISSING_TOKEN', 'Provide a group access token');
+    return;
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch {
+    sendError(ws, 'INVALID_TOKEN', 'Group token invalid or expired');
+    return;
+  }
+
+  if (payload.tokenType !== 'group_access') {
+    sendError(ws, 'WRONG_TOKEN_TYPE', 'Use a group_access token');
+    return;
+  }
+
+  const { deviceId, groupId } = payload;
+  const group = groups.get(groupId);
+  if (!group) {
+    sendError(ws, 'GROUP_NOT_FOUND', 'Group no longer active');
+    return;
+  }
+
+  // Update (or add back) this device's ws reference
+  const existing = group.members.get(deviceId) || { displayName: null };
+  existing.ws = ws;
+  group.members.set(deviceId, existing);
+
+  ws._groupIds = ws._groupIds || new Set();
+  ws._groupIds.add(groupId);
+  ws._deviceId = ws._deviceId || deviceId;
+
+  // Notify others that this member is back online
+  for (const [memberId, member] of group.members) {
+    if (memberId !== deviceId && member.ws?.readyState === 1) {
+      send(member.ws, {
+        type: 'group_member_online',
+        groupId,
+        deviceId,
+        memberCount: group.members.size,
+      });
+    }
+  }
+
+  send(ws, {
+    type: 'group_authenticated',
+    groupId,
+    groupName: group.name,
+    memberCount: group.members.size,
+    isHost: group.hostDeviceId === deviceId,
+  });
+
+  console.log(`[GROUP] ${deviceId.slice(0, 8)}… re-authenticated to "${group.name}" (${groupId.slice(0, 8)}…)`);
+}
+
+// ─── Groups: broadcast sync ──────────────────────────────────────────
+function handleGroupSync(ws, msg) {
+  const { groupId, payload } = msg;
+  if (!groupId || !payload || typeof payload !== 'object') {
+    sendError(ws, 'INVALID_REQUEST', 'Provide groupId and payload');
+    return;
+  }
+
+  if (!ws._groupIds?.has(groupId)) {
+    sendError(ws, 'NOT_IN_GROUP', 'Not authenticated for this group');
+    return;
+  }
+
+  const group = groups.get(groupId);
+  if (!group) {
+    sendError(ws, 'GROUP_NOT_FOUND', 'Group not found');
+    return;
+  }
+
+  const syncType = payload.syncType;
+  const validGroupSyncTypes = ['itinerary', 'packing', 'announcement', 'reminder', 'display_name'];
+  if (!syncType || !validGroupSyncTypes.includes(syncType)) {
+    sendError(ws, 'INVALID_SYNC_TYPE', `Unknown group sync type: ${syncType}`);
+    return;
+  }
+
+  // Sanitise text fields
+  if (payload.displayName && typeof payload.displayName === 'string') {
+    payload.displayName = sanitizeText(payload.displayName).substring(0, 50);
+  }
+
+  const from = ws._deviceId;
+
+  // Broadcast to all other group members
+  let forwarded = 0;
+  for (const [memberId, member] of group.members) {
+    if (memberId !== from && member.ws?.readyState === 1) {
+      send(member.ws, {
+        type: 'group_sync',
+        groupId,
+        from,
+        payload,
+        ts: Date.now(),
+      });
+      forwarded++;
+    }
+  }
+
+  // Update display name on the group record
+  if (syncType === 'display_name' && payload.displayName && group.members.has(from)) {
+    group.members.get(from).displayName = payload.displayName;
+  }
+}
+
 // ─── Disconnect cleanup ──────────────────────────────────────────────
 function handleDisconnect(ws) {
   if (!ws._deviceId) return;
 
+  // ── Pair disconnect ──────────────────────────────────────────────
   const pairId = ws._pairId || deviceToPair.get(ws._deviceId);
-  if (!pairId) return;
-
-  const pair = activePairs.get(pairId);
-  if (!pair) return;
-
-  // Clear the ws reference so we don't hold stale socket objects in memory
-  if (pair.deviceA.id === ws._deviceId && pair.deviceA.ws === ws) {
-    pair.deviceA.ws = null;
-  } else if (pair.deviceB.id === ws._deviceId && pair.deviceB.ws === ws) {
-    pair.deviceB.ws = null;
+  if (pairId) {
+    const pair = activePairs.get(pairId);
+    if (pair) {
+      if (pair.deviceA.id === ws._deviceId && pair.deviceA.ws === ws) {
+        pair.deviceA.ws = null;
+      } else if (pair.deviceB.id === ws._deviceId && pair.deviceB.ws === ws) {
+        pair.deviceB.ws = null;
+      }
+      const partnerWs = getPartnerWs(pair, ws._deviceId);
+      if (partnerWs?.readyState === 1) {
+        send(partnerWs, { type: 'partner_offline' });
+      }
+      console.log(`[DC] Device ${ws._deviceId.slice(0, 8)}… disconnected from pair ${pairId.slice(0, 8)}…`);
+    }
   }
 
-  const partnerWs = getPartnerWs(pair, ws._deviceId);
-  if (partnerWs?.readyState === 1) {
-    send(partnerWs, { type: 'partner_offline' });
+  // ── Group disconnect — null out ws but keep membership ───────────
+  if (ws._groupIds) {
+    for (const groupId of ws._groupIds) {
+      const group = groups.get(groupId);
+      if (!group) continue;
+      const member = group.members.get(ws._deviceId);
+      if (member && member.ws === ws) {
+        member.ws = null;
+      }
+      // Notify remaining online members
+      for (const [memberId, m] of group.members) {
+        if (memberId !== ws._deviceId && m.ws?.readyState === 1) {
+          send(m.ws, {
+            type: 'group_member_offline',
+            groupId,
+            deviceId: ws._deviceId,
+          });
+        }
+      }
+    }
   }
-
-  console.log(`[DC] Device ${ws._deviceId.slice(0, 8)}… disconnected from pair ${pairId.slice(0, 8)}…`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -531,6 +821,32 @@ function generatePairCode() {
     code = String(Math.floor(100000 + Math.random() * 900000));
   } while (pairingCodes.has(code));
   return code;
+}
+
+// 8-digit group codes: 90 million possibilities vs 900k for pair codes —
+// higher entropy for multi-person groups while staying easy to type/read.
+function generateGroupCode() {
+  let code;
+  do {
+    code = String(Math.floor(10000000 + Math.random() * 90000000));
+  } while (pendingGroupCodes.has(code));
+  return code;
+}
+
+function issueGroupTokens(deviceId, groupId) {
+  // Group access tokens are intentionally short-lived (30 days) relative to
+  // pair tokens (365 days) because groups are temporary (a trip, an event).
+  const accessToken = jwt.sign(
+    { deviceId, groupId, tokenType: 'group_access' },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+  const refreshToken = jwt.sign(
+    { deviceId, groupId, tokenType: 'group_refresh' },
+    JWT_SECRET,
+    { expiresIn: '60d' }
+  );
+  return { groupAccessToken: accessToken, groupRefreshToken: refreshToken };
 }
 
 function issueTokens(deviceId, pairId) {
@@ -615,6 +931,13 @@ const cleanupInterval = setInterval(() => {
   for (const [pairId] of lastStateBuffer) {
     if (!activePairs.has(pairId)) {
       lastStateBuffer.delete(pairId);
+    }
+  }
+
+  // Expire stale group codes
+  for (const [code, entry] of pendingGroupCodes) {
+    if (now - entry.createdAt > GROUP_CODE_TTL * 1000) {
+      pendingGroupCodes.delete(code);
     }
   }
 }, 60000);
