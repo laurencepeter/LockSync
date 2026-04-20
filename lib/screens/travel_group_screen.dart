@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/storage_service.dart';
 import '../services/websocket_service.dart';
-import '../theme.dart';
 import '../widgets/animated_gradient_bg.dart';
 import '../widgets/glass_card.dart';
 
@@ -149,17 +148,17 @@ class _SecurityBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.teal.withValues(alpha: 0.22)),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          const Icon(Icons.shield_outlined,
+          Icon(Icons.shield_outlined,
               size: 16, color: Colors.tealAccent),
-          const SizedBox(width: 10),
+          SizedBox(width: 10),
           Expanded(
             child: Text.rich(
               TextSpan(
-                style: const TextStyle(
+                style: TextStyle(
                     color: Colors.white60, fontSize: 12),
-                children: const [
+                children: [
                   TextSpan(
                     text: 'Group codes are 8-digit, ',
                   ),
@@ -329,7 +328,6 @@ class _CreateJoinCardState extends State<_CreateJoinCard> {
   final _nameController = TextEditingController();
   final _codeController = TextEditingController();
   bool _loading = false;
-  String? _pendingGroupCode; // code shown after creation
   StreamSubscription? _sub;
 
   @override
@@ -366,7 +364,7 @@ class _CreateJoinCardState extends State<_CreateJoinCard> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Group "${name}" created! '
+          content: Text('Group "$name" created! '
               'Share the code with your travel companions.'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: _kTravelAccent.withValues(alpha: 0.9),
