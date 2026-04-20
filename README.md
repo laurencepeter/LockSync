@@ -18,29 +18,28 @@ LockSync is an app that allows users to have a coordinated synchronized lockscre
 
 The relay server is a Node.js WebSocket server. It handles pairing, JWT auth, and real-time message forwarding.
 
-### Setup
+LockSync — Getting Started
+LockSync lets two people share and sync their lock screens in real time — drawing, messages, photos, and more, instantly reflected on both devices.
 
-```bash
-cd server
-cp .env.example .env
-# Edit .env — set JWT_SECRET to a random 64-byte hex string
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-npm install
-npm start
-```
 
-### Deploy with Docker
+# How to use?
 
-```bash
-cd server
-docker compose up -d
-```
+1. Pair Your Devices
+One person opens the app and taps Generate Code — a 6-digit code (and QR option) appears. The other person taps Enter Code and types it in (or scans the QR). That's it — you're paired.
 
-See `server/nginx-locksync.conf` for a production Nginx reverse proxy config.
+Codes expire in 5 minutes. You only need to pair once; the app reconnects automatically after that.
 
-## Flutter App
+2. Main Features
+Tab	What it does
+Chat	Send messages that appear on each other's lock screen
+Canvas	Draw together in real time — becomes your shared wallpaper
+Widgets	Add shared widgets (clocks, notes, countdowns) to the lock screen
+Moments	A private shared photo gallery between the two of you
+Travel Groups	Create or join a group trip with a shared itinerary and packing list
+3. Travel Groups (optional)
+Tap the Travel tab → Start or join a trip group → create with a name or join with an 8-digit code. Share the code with travel companions. Group codes expire in 5 minutes and support up to 30 days of synced membership.
 
-```bash
-flutter pub get
-flutter run
-```
+4. Tips
+Both devices need the app open at least once to establish the connection.
+No account or sign-up required — pairing is anonymous.
+To re-pair or switch partners, go to Settings and unpair.
