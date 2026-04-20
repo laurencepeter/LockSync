@@ -104,6 +104,7 @@ class StorageService {
   static const _keyScreenshotDevMode = 'locksync_screenshot_dev_mode';
   static const _keyDevProfiles = 'locksync_dev_profiles';
   static const _keyActiveDevProfileId = 'locksync_active_dev_profile_id';
+  static const _keyPairMode = 'locksync_pair_mode';
 
   late SharedPreferences _prefs;
 
@@ -299,6 +300,12 @@ class StorageService {
       _prefs.getBool(_keyScreenshotDevMode) ?? false;
   Future<void> setScreenshotDevMode(bool value) async {
     await _prefs.setBool(_keyScreenshotDevMode, value);
+  }
+
+  // Pair mode: 'couple' (default) or 'travel'
+  String get pairMode => _prefs.getString(_keyPairMode) ?? 'couple';
+  Future<void> setPairMode(String mode) async {
+    await _prefs.setString(_keyPairMode, mode);
   }
 
   // Moments (received image/video moments with view-count tracking)

@@ -80,6 +80,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   final _nudgeController = StreamController<void>.broadcast();
   Stream<void> get onNudge => _nudgeController.stream;
 
+  // Fires once whenever a brand-new pairing is established (only _handlePaired,
+  // NOT re-authentication of an existing session).
+  final _newPairingController = StreamController<void>.broadcast();
+  Stream<void> get onNewPairing => _newPairingController.stream;
+
   ConnectionStatus get status => _status;
   String? get pairingCode => _pairingCode;
   String? get pairId => _pairId;
@@ -94,6 +99,11 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
   /// Last known result of a GET [AppConfig.healthUrl] check.
   /// `null` until the first check completes.
   bool? get serverHealthy => _serverHealthy;
+  String get pairMode => storage.pairMode;
+  Future<void> setPairMode(String mode) async {
+    await storage.setPairMode(mode);
+    notifyListeners();
+  }
 
   WebSocketService({required this.storage}) {
     WidgetsBinding.instance.addObserver(this);
@@ -585,6 +595,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     _syncMood();
 
     notifyListeners();
+    _newPairingController.add(null);
   }
 
   void requestCode() {
@@ -761,6 +772,7 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
     );
     await storage.saveDevProfile(profile);
     await storage.setActiveDevProfileId(profile.id);
+    notifyListeners();
     return profile;
   }
 
@@ -820,6 +832,19 @@ class WebSocketService extends ChangeNotifier with WidgetsBindingObserver {
       await storage.setDisplayName(profile.myDisplayName!);
     }
     await storage.setActiveDevProfileId(profile.id);
+
+    // Clear all shared partner content so no data leaks between profiles.
+    // The new partner's content arrives via WebSocket once reconnected.
+    await storage.setGroceryList([]);
+    await storage.setWatchlist([]);
+    await storage.setReminders([]);
+    await storage.setCountdowns([]);
+    await storage.setMoments([]);
+    await storage.setCanvasState('{}');
+    // Notify widget screens to re-read the now-empty lists immediately.
+    for (final t in ['grocery', 'watchlist', 'reminder', 'countdown', 'moment']) {
+      _widgetSyncController.add({'syncType': t, 'items': []});
+    }
 
     // Restore cached live state for the selected profile
     _pairId = profile.pairId;
