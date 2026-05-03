@@ -523,32 +523,37 @@ class _SyncScreenState extends State<SyncScreen>
                       ),
                     ),
 
-                    // Reconnecting overlay
-                    if (ws.isReconnecting)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 6, horizontal: 16),
-                        color: Colors.amber.withValues(alpha: 0.15),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.amber,
+                    // Reconnecting overlay — AnimatedSize so it slides in/out
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeInOut,
+                      child: ws.isReconnecting
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 6, horizontal: 16),
+                              color: Colors.amber.withValues(alpha: 0.15),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.amber,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Reconnecting...',
+                                    style: TextStyle(
+                                        color: Colors.amber, fontSize: 13),
+                                  ),
+                                ],
                               ),
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Reconnecting...',
-                              style:
-                                  TextStyle(color: Colors.amber, fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
 
                     const Divider(color: Colors.white10, height: 1),
 
@@ -634,7 +639,24 @@ class _SyncScreenState extends State<SyncScreen>
                 onTap: () async {
                   await Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const CanvasScreen()),
+                    PageRouteBuilder(
+                      pageBuilder: (_, __, ___) => const CanvasScreen(),
+                      transitionDuration: const Duration(milliseconds: 350),
+                      reverseTransitionDuration:
+                          const Duration(milliseconds: 280),
+                      transitionsBuilder: (_, animation, __, child) {
+                        return SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 1),
+                            end: Offset.zero,
+                          ).animate(CurvedAnimation(
+                            parent: animation,
+                            curve: Curves.easeOutCubic,
+                          )),
+                          child: child,
+                        );
+                      },
+                    ),
                   );
                   _loadCanvasPreview();
                   setState(() {});
@@ -653,10 +675,20 @@ class _SyncScreenState extends State<SyncScreen>
                   ws.sendNudge();
                   HapticFeedback.mediumImpact();
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Nudge sent!'),
+                    SnackBar(
+                      content: const Row(
+                        children: [
+                          Icon(Icons.vibration_rounded,
+                              color: Colors.white, size: 16),
+                          SizedBox(width: 8),
+                          Text('Nudge sent!'),
+                        ],
+                      ),
                       behavior: SnackBarBehavior.floating,
-                      duration: Duration(seconds: 1),
+                      duration: const Duration(seconds: 1),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      margin: const EdgeInsets.all(16),
                     ),
                   );
                 },
@@ -697,7 +729,23 @@ class _SyncScreenState extends State<SyncScreen>
       onTap: () async {
         await Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const CanvasScreen()),
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const CanvasScreen(),
+            transitionDuration: const Duration(milliseconds: 350),
+            reverseTransitionDuration: const Duration(milliseconds: 280),
+            transitionsBuilder: (_, animation, __, child) {
+              return SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 1),
+                  end: Offset.zero,
+                ).animate(CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutCubic,
+                )),
+                child: child,
+              );
+            },
+          ),
         );
         _loadCanvasPreview();
         setState(() {});

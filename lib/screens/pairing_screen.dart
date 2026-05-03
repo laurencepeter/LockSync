@@ -84,6 +84,113 @@ class _PairingScreenState extends State<PairingScreen>
     }
   }
 
+  void _copyCodeToClipboard(String code) {
+    Clipboard.setData(ClipboardData(text: code));
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Text('Code copied to clipboard!'),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _showShareBottomSheet(String code) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Share Pairing Code',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Ask your partner to enter this code in LockSync',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: [
+                    LockSyncTheme.primaryColor.withValues(alpha: 0.25),
+                    LockSyncTheme.accentColor.withValues(alpha: 0.1),
+                  ],
+                ),
+                border: Border.all(
+                  color: LockSyncTheme.primaryColor.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Text(
+                code.replaceRange(3, 3, ' '),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 36,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 6,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  _copyCodeToClipboard(code);
+                  Navigator.pop(ctx);
+                },
+                icon: const Icon(Icons.copy_rounded),
+                label: const Text('Copy Code'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: LockSyncTheme.primaryColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _fillCodeFromScanner(String code) {
     for (int i = 0; i < 6 && i < code.length; i++) {
       _codeControllers[i].text = code[i];
@@ -383,21 +490,61 @@ class _PairingScreenState extends State<PairingScreen>
                   ),
                   const SizedBox(height: 24),
 
-                  // Code display — fixed layout with proper constraints
-                  _AnimatedCodeDisplay(code: code),
+                  // Code display — tap to copy
+                  _AnimatedCodeDisplay(
+                    code: code,
+                    onTap: () => _copyCodeToClipboard(code),
+                  ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
+
+                  Text(
+                    'Tap code to copy',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.3),
+                      fontSize: 11,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Copy and Share buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => _copyCodeToClipboard(code),
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        label: const Text('Copy'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: LockSyncTheme.accentColor,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: () => _showShareBottomSheet(code),
+                        icon: const Icon(Icons.share_rounded, size: 16),
+                        label: const Text('Share'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: LockSyncTheme.primaryColor,
+                        ),
+                      ),
+                    ],
+                  ),
 
                   // Expiry timer
                   _ExpiryIndicator(secondsLeft: _secondsLeft),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
 
                   // Regenerate
                   TextButton.icon(
                     onPressed: () => _generateCode(ws),
                     icon: const Icon(Icons.refresh_rounded, size: 18),
                     label: const Text('Generate New Code'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white54,
+                    ),
                   ),
                 ],
               ),
@@ -587,69 +734,73 @@ class _PairingScreenState extends State<PairingScreen>
 // ─── Animated code display — fixed with proper constraints ──────────
 class _AnimatedCodeDisplay extends StatelessWidget {
   final String code;
-  const _AnimatedCodeDisplay({required this.code});
+  final VoidCallback? onTap;
+  const _AnimatedCodeDisplay({required this.code, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          const totalGap = 8.0 * 4 + 16.0;
-          final digitWidth =
-              ((constraints.maxWidth - totalGap) / 6).clamp(36.0, 48.0);
-          final digitHeight = digitWidth * 1.27;
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            const totalGap = 8.0 * 4 + 16.0;
+            final digitWidth =
+                ((constraints.maxWidth - totalGap) / 6).clamp(36.0, 48.0);
+            final digitHeight = digitWidth * 1.27;
 
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(code.length, (i) {
-              return TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: Duration(milliseconds: 300 + i * 100),
-                curve: Curves.easeOutBack,
-                builder: (context, value, child) {
-                  return Transform.scale(
-                    scale: value,
-                    child: Opacity(
-                      opacity: value.clamp(0, 1),
-                      child: child,
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(code.length, (i) {
+                return TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: 1),
+                  duration: Duration(milliseconds: 300 + i * 80),
+                  curve: Curves.easeOutBack,
+                  builder: (context, value, child) {
+                    return Transform.scale(
+                      scale: value,
+                      child: Opacity(
+                        opacity: value.clamp(0, 1),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: Container(
+                    width: digitWidth,
+                    height: digitHeight,
+                    margin:
+                        EdgeInsets.only(left: i == 0 ? 0 : (i == 3 ? 16 : 8)),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          LockSyncTheme.primaryColor.withValues(alpha: 0.3),
+                          LockSyncTheme.accentColor.withValues(alpha: 0.15),
+                        ],
+                      ),
+                      border: Border.all(
+                        color:
+                            LockSyncTheme.primaryColor.withValues(alpha: 0.4),
+                      ),
                     ),
-                  );
-                },
-                child: Container(
-                  width: digitWidth,
-                  height: digitHeight,
-                  margin:
-                      EdgeInsets.only(left: i == 0 ? 0 : (i == 3 ? 16 : 8)),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        LockSyncTheme.primaryColor.withValues(alpha: 0.3),
-                        LockSyncTheme.accentColor.withValues(alpha: 0.15),
-                      ],
-                    ),
-                    border: Border.all(
-                      color:
-                          LockSyncTheme.primaryColor.withValues(alpha: 0.4),
+                    alignment: Alignment.center,
+                    child: Text(
+                      code[i],
+                      style: TextStyle(
+                        fontSize: digitWidth * 0.5,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    code[i],
-                    style: TextStyle(
-                      fontSize: digitWidth * 0.5,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              );
-            }),
-          );
-        },
+                );
+              }),
+            );
+          },
+        ),
       ),
     );
   }
