@@ -44,6 +44,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
   CanvasTool _currentTool = CanvasTool.draw;
   Color _currentColor = LockSyncTheme.primaryColor;
   double _penThickness = 3.0;
+  double _eraserThickness = 20.0;
   double _textSize = 18.0;
   String _selectedFont = 'Inter';
 
@@ -295,8 +296,9 @@ class _CanvasScreenState extends State<CanvasScreen> {
             color: _currentTool == CanvasTool.eraser
                 ? _themeColorInt(_canvasState.theme)
                 : _currentColor.toARGB32(),
-            thickness:
-                _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
+            thickness: _currentTool == CanvasTool.eraser
+                ? _eraserThickness
+                : _penThickness,
             isEraser: _currentTool == CanvasTool.eraser,
           ));
           _currentStrokePoints = [];
@@ -349,8 +351,9 @@ class _CanvasScreenState extends State<CanvasScreen> {
           color: _currentTool == CanvasTool.eraser
               ? _themeColorInt(_canvasState.theme)
               : _currentColor.toARGB32(),
-          thickness:
-              _currentTool == CanvasTool.eraser ? 20.0 : _penThickness,
+          thickness: _currentTool == CanvasTool.eraser
+              ? _eraserThickness
+              : _penThickness,
           isEraser: _currentTool == CanvasTool.eraser,
         ));
       }
@@ -831,7 +834,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
                                 ? Color(_themeColorInt(_canvasState.theme))
                                 : _currentColor,
                             currentThickness: _currentTool == CanvasTool.eraser
-                                ? 20.0
+                                ? _eraserThickness
                                 : _penThickness,
                           ),
                         ),
@@ -936,116 +939,149 @@ class _CanvasScreenState extends State<CanvasScreen> {
 
             const SizedBox(height: 8),
 
-            // Options row based on tool
-            if (_currentTool == CanvasTool.draw ||
-                _currentTool == CanvasTool.eraser) ...[
-              Row(
-                children: [
-                  // Color picker
-                  if (_currentTool == CanvasTool.draw)
-                    GestureDetector(
-                      onTap: _showColorPicker,
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: _currentColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white30, width: 2),
-                        ),
-                      ),
-                    ),
-                  if (_currentTool == CanvasTool.draw)
-                    const SizedBox(width: 12),
-                  // Thickness slider
-                  Expanded(
-                    child: Slider(
-                      value: _currentTool == CanvasTool.eraser
-                          ? 20.0
-                          : _penThickness,
-                      min: 1,
-                      max: _currentTool == CanvasTool.eraser ? 40 : 15,
-                      onChanged: (v) {
-                        setState(() {
-                          if (_currentTool != CanvasTool.eraser) {
-                            _penThickness = v;
-                          }
-                        });
-                      },
-                      activeColor: LockSyncTheme.primaryColor,
-                    ),
-                  ),
-                  Text(
-                    _currentTool == CanvasTool.eraser
-                        ? 'Eraser'
-                        : '${_penThickness.toStringAsFixed(0)}px',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                ],
+            // Options row based on tool — animated crossfade between tool modes
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: child,
               ),
-            ] else if (_currentTool == CanvasTool.text) ...[
-              Row(
-                children: [
-                  GestureDetector(
-                    onTap: _showColorPicker,
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: _currentColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white30, width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: _showFontPicker,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _selectedFont,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Slider(
-                      value: _textSize,
-                      min: 12,
-                      max: 48,
-                      onChanged: (v) => setState(() => _textSize = v),
-                      activeColor: LockSyncTheme.primaryColor,
-                    ),
-                  ),
-                  Text(
-                    '${_textSize.toStringAsFixed(0)}pt',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                ],
-              ),
-            ] else ...[
-              const SizedBox(
-                height: 40,
-                child: Center(
-                  child: Text(
-                    'Tap on canvas to place, long-press to delete',
-                    style: TextStyle(color: Colors.white30, fontSize: 12),
-                  ),
-                ),
-              ),
-            ],
+              child: _buildToolOptions(),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildToolOptions() {
+    if (_currentTool == CanvasTool.draw || _currentTool == CanvasTool.eraser) {
+      return SizedBox(
+        key: ValueKey(_currentTool == CanvasTool.eraser ? 'eraser' : 'draw'),
+        child: Row(
+          children: [
+            if (_currentTool == CanvasTool.draw) ...[
+              GestureDetector(
+                onTap: _showColorPicker,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _currentColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white30, width: 2),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Slider(
+                value: _currentTool == CanvasTool.eraser
+                    ? _eraserThickness
+                    : _penThickness,
+                min: 3,
+                max: _currentTool == CanvasTool.eraser ? 60 : 20,
+                onChanged: (v) {
+                  setState(() {
+                    if (_currentTool == CanvasTool.eraser) {
+                      _eraserThickness = v;
+                    } else {
+                      _penThickness = v;
+                    }
+                  });
+                },
+                activeColor: _currentTool == CanvasTool.eraser
+                    ? Colors.white54
+                    : LockSyncTheme.primaryColor,
+              ),
+            ),
+            SizedBox(
+              width: 36,
+              child: Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: (_currentTool == CanvasTool.eraser
+                          ? _eraserThickness
+                          : _penThickness)
+                      .clamp(6, 22),
+                  height: (_currentTool == CanvasTool.eraser
+                          ? _eraserThickness
+                          : _penThickness)
+                      .clamp(6, 22),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentTool == CanvasTool.eraser
+                        ? Colors.white38
+                        : _currentColor,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (_currentTool == CanvasTool.text) {
+      return SizedBox(
+        key: const ValueKey('text'),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: _showColorPicker,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: _currentColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white30, width: 2),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _showFontPicker,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _selectedFont,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Slider(
+                value: _textSize,
+                min: 12,
+                max: 48,
+                onChanged: (v) => setState(() => _textSize = v),
+                activeColor: LockSyncTheme.primaryColor,
+              ),
+            ),
+            Text(
+              '${_textSize.toStringAsFixed(0)}pt',
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    } else {
+      return const SizedBox(
+        key: ValueKey('other'),
+        height: 40,
+        child: Center(
+          child: Text(
+            'Tap on canvas to place, long-press to delete',
+            style: TextStyle(color: Colors.white30, fontSize: 12),
+          ),
+        ),
+      );
+    }
   }
 
   Widget _toolButton(CanvasTool tool, IconData icon, String label) {
